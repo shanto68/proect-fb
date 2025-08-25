@@ -18,10 +18,10 @@ FB_PAGE_ID = os.environ.get("FB_PAGE_ID")
 FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 GEN_API_KEY = os.environ.get("GEMINI_API_KEY")
 FIREBASE_KEY_JSON = os.environ.get("FIREBASE_KEY_JSON")  # base64 encoded service account JSON
-FIREBASE_DB_URL = os.environ.get("FIREBASE_DB_URL")  # Realtime DB URL
+FIREBASE_DB_URL = os.environ.get("FIREBASE_DB_URL")      # Realtime DB URL
 MAX_IMAGES = int(os.environ.get("MAX_IMAGES", 4))
 POST_AS_CAROUSEL = os.environ.get("POST_AS_CAROUSEL", "true").lower() == "true"
-TIMEOUT = 160  # increased from 20
+TIMEOUT = 160  # Increased timeout
 RETRIES = 3
 
 # -----------------------------
@@ -50,7 +50,6 @@ model = genai.GenerativeModel("gemini-2.5-flash")
 # -----------------------------
 # Helpers
 # -----------------------------
-
 def safe_gemini_text(resp):
     try:
         if hasattr(resp, "text") and resp.text:
@@ -65,7 +64,6 @@ def safe_gemini_text(resp):
         pass
     return ""
 
-
 def get_soup(url, retries=RETRIES):
     headers = {"User-Agent": "Mozilla/5.0"}
     for attempt in range(retries):
@@ -79,29 +77,20 @@ def get_soup(url, retries=RETRIES):
     print("❌ All attempts failed.")
     return None
 
-
 def extract_listing_first_article(list_url):
     soup = get_soup(list_url)
     if not soup:
         return None
-    candidates = ["li.bbc-t44f9r", "li[data-testid='edinburgh-card']"]
-    first = None
-    for sel in candidates:
-        first = soup.select_one(sel)
-        if first:
-            break
+    # Updated selector for BBC Bangla top article
+    first = soup.select_one("div[data-entityid='container-top-stories#1'] a")
     if not first:
         return None
-    h2 = first.select_one("h2 a") or first.find("a")
-    if not h2:
-        return None
-    title = h2.get_text(strip=True)
-    href = h2.get("href", "").strip()
+    title = first.get_text(strip=True)
+    href = first.get("href", "").strip()
     article_url = urljoin("https://www.bbc.com", href)
-    img = first.find("img")
-    feature_image = img.get("src") if img else None
+    img_tag = first.find("img")
+    feature_image = img_tag.get("src") if img_tag else None
     return {"title": title, "url": article_url, "feature_image": feature_image}
-
 
 def extract_article_images(article_url, max_images=4):
     imgs = []
@@ -140,7 +129,7 @@ if feature_image and feature_image not in images:
 images = images[:MAX_IMAGES] if images else ([] if not feature_image else [feature_image])
 
 # -----------------------------
-# Generate content (Summary, Captions, Hashtags)
+# Generate content
 # -----------------------------
 summary_prompt = f"""
 তুমি একজন সোশ্যাল মিডিয়া কপিরাইটার। নিচের নিউজের জন্য ২–৩ লাইনের ছোট বাংলা সারাংশ লিখো।
@@ -189,8 +178,9 @@ if not FB_PAGE_ID or not FB_ACCESS_TOKEN:
 uploaded_media_ids = []
 for idx, img_url in enumerate(images):
     try:
-        resp = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos", 
-                             data={"url": img_url, "published": False, "access_token": FB_ACCESS_TOKEN}, timeout=TIMEOUT)
+        resp = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos",
+                             data={"url": img_url, "published": False, "access_token": FB_ACCESS_TOKEN},
+                             timeout=TIMEOUT)
         data = resp.json()
         if resp.status_code == 200 and "id" in data:
             uploaded_media_ids.append(data["id"])
@@ -202,22 +192,22 @@ for idx, img_url in enumerate(images):
 
 # Publish post
 if not uploaded_media_ids:
-    result = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed", 
-                           data={"message": message, "link": article_url, "access_token": FB_ACCESS_TOKEN}, timeout=TIMEOUT).json()
+    result = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed",
+                           data={"message": message, "link": article_url, "access_token": FB_ACCESS_TOKEN},
+                           timeout=TIMEOUT).json()
 else:
     if POST_AS_CAROUSEL and len(uploaded_media_ids) > 1:
-        # Carousel style post
         payload = {"message": message, "access_token": FB_ACCESS_TOKEN}
         for i, mid in enumerate(uploaded_media_ids):
             payload[f"attached_media[{i}]"] = json.dumps({"media_fbid": mid})
         result = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed",
                                data=payload, timeout=TIMEOUT).json()
     else:
-        # Single photo post
         result = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed",
                                data={"message": message,
                                      "attached_media[0]": json.dumps({"media_fbid": uploaded_media_ids[0]}),
-                                     "access_token": FB_ACCESS_TOKEN}, timeout=TIMEOUT).json()
+                                     "access_token": FB_ACCESS_TOKEN},
+                               timeout=TIMEOUT).json()
 
 print("Facebook Response:", result)
 
