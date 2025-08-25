@@ -22,6 +22,16 @@ MAX_IMAGES = int(os.environ.get("MAX_IMAGES", 4))  # কতগুলো ছব�
 POST_AS_CAROUSEL = os.environ.get("POST_AS_CAROUSEL", "true").lower() == "true"
 TIMEOUT = 20
 
+# -----------------------------
+# Install/check firebase-admin
+# -----------------------------
+try:
+    import firebase_admin
+except ImportError:
+    import subprocess
+    subprocess.check_call(["python", "-m", "pip", "install", "firebase-admin"])
+    import firebase_admin
+
 # Gemini init
 if not GEN_API_KEY:
     print("❌ GEMINI_API_KEY missing.")
