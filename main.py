@@ -48,7 +48,7 @@ if article_url in posted_articles:
     exit()
 
 # -----------------------------
-# 4️⃣ Generate Eye-catching Content with Gemini
+# 4️⃣ Generate Eye-catching Content with Gemini 2.5-flash
 # -----------------------------
 prompt = f"""
 Article Title: {title}
@@ -61,9 +61,16 @@ Include:
 - relevant hashtags
 """
 
-model = genai.TextModel("gemini-2.5-flash")
-response = model.generate_content(prompt)
-fb_content = response.result[0].content
+# Updated Gemini API usage
+model = genai.get_model("gemini-2.5-flash")
+response = model.generate(
+    messages=[
+        {"role": "user", "content": prompt}
+    ]
+)
+
+# Gemini response
+fb_content = response.candidates[0].content
 print("Generated FB Content:\n", fb_content)
 
 # -----------------------------
