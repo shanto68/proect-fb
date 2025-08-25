@@ -60,7 +60,7 @@ except:
     posted_articles = []
 
 # -----------------------------
-# 3️⃣ Scrape latest article & images
+# 3️⃣ Scrape latest article & high-res images
 # -----------------------------
 response = requests.get(URL)
 soup = BeautifulSoup(response.content, "html.parser")
@@ -77,17 +77,30 @@ article_url = title_tag.find("a")["href"]
 if not article_url.startswith("http"):
     article_url = "https://www.bbc.com" + article_url
 
-# Image(s)
+# Image(s) - High Resolution
 image_urls = []
 promo_image_div = first_article.find("div", class_="promo-image")
 if promo_image_div:
     imgs = promo_image_div.find_all("img")
     for img in imgs:
-        src = img.get("src")
-        if src:
-            image_urls.append(src)
+        srcset = img.get("srcset")
+        if srcset:
+            # srcset থেকে সর্বোচ্চ width image নির্বাচন
+            candidates = []
+            for part in srcset.split(","):
+                url_part, size_part = part.strip().split(" ")
+                width = int(size_part.replace("w", ""))
+                candidates.append((width, url_part))
+            candidates.sort(reverse=True)  # descending by width
+            high_res_url = candidates[0][1]
+            image_urls.append(high_res_url)
+        else:
+            # যদি srcset না থাকে, src ব্যবহার কর
+            src = img.get("src")
+            if src:
+                image_urls.append(src)
 
-print("Images found:", image_urls)
+print("High-res Images found:", image_urls)
 
 # -----------------------------
 # 4️⃣ Duplicate check
