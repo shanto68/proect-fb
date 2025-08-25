@@ -31,6 +31,10 @@ response = requests.get(URL)
 soup = BeautifulSoup(response.content, "html.parser")
 
 first_article = soup.find("li", class_="bbc-t44f9r")
+if not first_article:
+    print("❌ No article found on page. Exiting.")
+    exit()
+
 title_tag = first_article.find("h2", class_="bbc-qqcsu8")
 title = title_tag.get_text(strip=True)
 article_url = title_tag.find("a")["href"]
@@ -48,7 +52,7 @@ if article_url in posted_articles:
     exit()
 
 # -----------------------------
-# 4️⃣ Generate Eye-catching Content with Gemini 2.5-flash
+# 4️⃣ Generate Eye-catching Content with Gemini
 # -----------------------------
 prompt = f"""
 Article Title: {title}
@@ -61,16 +65,10 @@ Include:
 - relevant hashtags
 """
 
-# Updated Gemini API usage
-model = genai.get_model("gemini-2.5-flash")
-response = model.chat(
-    messages=[
-        {"role": "user", "content": prompt}
-    ]
-)
+model = genai.get_model("gemini-2.5-flash")  # get_model
+response = model.generate_content(prompt)     # generate_content
 
-# Gemini response
-fb_content = response.last.content
+fb_content = response.result[0].content
 print("Generated FB Content:\n", fb_content)
 
 # -----------------------------
@@ -100,4 +98,3 @@ if "id" in fb_result:
         json.dump(posted_articles, f)
 else:
     print("❌ Post failed. Check logs.")
-
