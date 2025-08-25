@@ -2,7 +2,7 @@ name: Auto Post to FB
 
 on:
   schedule:
-    - cron: '0 * * * *'  # প্রতি ঘন্টা চালাবে
+    - cron: '0 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -20,8 +20,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Add credentials.json
-        run: echo "${{ secrets.GOOGLE_CREDENTIALS }}" > credentials.json
+      - name: Create credentials.json from Secret
+        run: |
+          echo "${{ secrets.GOOGLE_CREDENTIALS }}" > credentials.json
 
       - name: Run Script
         env:
