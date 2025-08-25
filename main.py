@@ -67,6 +67,7 @@ Make it:
 - Must be scroll-stopping for Facebook users
 """
 
+# Using GenerativeModel as requested
 model = genai.GenerativeModel("gemini-2.5-flash")
 response = model.generate_content(prompt)
 news_content = response.text.strip()
@@ -78,12 +79,14 @@ if not news_content:
 print("Generated FB Content:\n", news_content)
 
 # -----------------------------
-# 5️⃣ Post to Facebook Page
+# 5️⃣ Post to Facebook Page (Public)
 # -----------------------------
 post_data = {
     "message": news_content,
     "link": article_url,
     "picture": feature_image,
+    "privacy": json.dumps({"value": "EVERYONE"}),  # PUBLIC
+    "published": True,                             # Live post
     "access_token": FB_ACCESS_TOKEN
 }
 
