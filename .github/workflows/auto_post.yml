@@ -9,32 +9,19 @@ on:
 jobs:
   post_job:
     runs-on: ubuntu-latest
-
     steps:
-      # 1️⃣ Checkout repository
-      - name: Checkout Code
+      - name: Checkout
         uses: actions/checkout@v3
 
-      # 2️⃣ Setup Python
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      # 3️⃣ Install dependencies
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install firebase-admin pillow
+        run: pip install -r requirements.txt
 
-      # 4️⃣ Setup Firebase Key from Base64 Secret
-      - name: Setup Firebase Key
-        run: |
-          echo "${{ secrets.FIREBASE_KEY_BASE64 }}" | base64 --decode > firebase_key.json
-
-      # 5️⃣ Run Auto Post Script
-      - name: Run Auto Post Script
+      - name: Run Script
         env:
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
           FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }}
