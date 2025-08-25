@@ -56,26 +56,32 @@ if article_url in posted_articles:
 # -----------------------------
 prompt = f"""
 Article Title: {title}
-Feature Image: {feature_image}
+Feature Image: {feature_image if feature_image else 'No image'}
 Write a high-quality, engaging, and eye-catching Facebook post content for this article.
-Include:
-- short punchy sentences
-- curiosity hooks
-- emojis
-- relevant hashtags
+Make it:
+- Short and punchy sentences
+- Curiosity hooks to make people click
+- Include emojis naturally
+- Include 3-5 relevant hashtags
+- Friendly and human-like tone
+- Must be scroll-stopping for Facebook users
 """
 
-model = genai.get_model("gemini-2.5-flash")
-response = model.generate_text(prompt)
-fb_content = response.text.strip()  # ✅ এখানে সরাসরি .text ব্যবহার করা ভালো
+model = genai.GenerativeModel("gemini-2.5-flash")
+response = model.generate_content(prompt)
+news_content = response.text.strip()
 
-print("Generated FB Content:\n", fb_content)
+if not news_content:
+    print("❌ Gemini content generate হয়নি। Exiting.")
+    exit(0)
+
+print("Generated FB Content:\n", news_content)
 
 # -----------------------------
 # 5️⃣ Post to Facebook Page
 # -----------------------------
 post_data = {
-    "message": fb_content,
+    "message": news_content,
     "link": article_url,
     "picture": feature_image,
     "access_token": FB_ACCESS_TOKEN
