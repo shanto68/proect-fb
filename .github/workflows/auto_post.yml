@@ -27,9 +27,9 @@ jobs:
         uses: browser-actions/setup-chrome@v1
 
       - name: Setup ChromeDriver
-        uses: nanasess/setup-chromedriver@v1
+        uses: actions/setup-chromedriver@v4
         with:
-          chrome-version: 'latest'
+          version: 'latest'
 
       - name: Run Python Script
         env:
