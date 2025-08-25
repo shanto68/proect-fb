@@ -28,11 +28,12 @@ jobs:
           pip install -r requirements.txt
           pip install firebase-admin pillow
 
-      # 4️⃣ Setup Firebase key
+      # 4️⃣ Setup Firebase Key from Base64 Secret
       - name: Setup Firebase Key
-        run: echo "${{ secrets.FIREBASE_KEY_JSON }}" > firebase_key.json
+        run: |
+          echo "${{ secrets.FIREBASE_KEY_BASE64 }}" | base64 --decode > firebase_key.json
 
-      # 5️⃣ Run Python Script
+      # 5️⃣ Run Auto Post Script
       - name: Run Auto Post Script
         env:
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
