@@ -2,12 +2,13 @@ name: RSS to Facebook
 
 on:
   schedule:
-    - cron: "0 * * * *"   # প্রতি ১ ঘণ্টায় একবার রান হবে
-  workflow_dispatch:       # চাইলে ম্যানুয়ালি চালাতে পারবেন
+    - cron: "0 * * * *"   # প্রতি ১ ঘণ্টায় রান
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -22,9 +23,20 @@ jobs:
           pip install feedparser google-generativeai requests
 
       - name: Run Script
-        run: python main.py
+        id: run_script
+        run: |
+          python main.py > output.txt
+          cat output.txt
         env:
           RSS_URL: ${{ secrets.RSS_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
           FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }}
+
+      - name: Check if post successful
+        run: |
+          if grep -q '"id"' output.txt; then
+            echo "🎉 Congratulation! Post successful."
+          else
+            echo "❌ Post not done. Check logs."
+          fi
