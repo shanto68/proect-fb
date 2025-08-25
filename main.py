@@ -16,6 +16,7 @@ if len(feed.entries) == 0:
     exit(0)
 
 latest_title = feed.entries[0].title
+print("Latest Article Title:", latest_title)
 
 # 2) Gemini-2.5-Flash দিয়ে নিউজ জেনারেট
 genai.configure(api_key=GEMINI_API_KEY)
@@ -23,8 +24,13 @@ model = genai.GenerativeModel("gemini-2.5-flash")
 
 prompt = f"এই টাইটেল থেকে আকর্ষণীয় নিউজ বানাও (মানুষ পড়তে চাইবে এমনভাবে): {latest_title}"
 response = model.generate_content(prompt)
+news_content = response.text.strip()
 
-news_content = response.text
+if not news_content:
+    print("Gemini content generate হয়নি।")
+    exit(0)
+
+print("Generated News Content:", news_content)
 
 # 3) ফেসবুকে পোস্ট করা
 post_url = f"https://graph.facebook.com/{FB_PAGE_ID}/feed"
@@ -33,4 +39,4 @@ payload = {
     "access_token": FB_ACCESS_TOKEN
 }
 res = requests.post(post_url, data=payload)
-print(res.json())
+print("Facebook Response:", res.json())
