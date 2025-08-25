@@ -60,7 +60,7 @@ except:
     posted_articles = []
 
 # -----------------------------
-# 3️⃣ Scrape latest article
+# 3️⃣ Scrape latest article & images
 # -----------------------------
 response = requests.get(URL)
 soup = BeautifulSoup(response.content, "html.parser")
@@ -70,19 +70,24 @@ if not first_article:
     print("❌ No article found. Exiting.")
     exit()
 
+# Title
 title_tag = first_article.find("h2", class_="bbc-qqcsu8")
 title = title_tag.get_text(strip=True)
 article_url = title_tag.find("a")["href"]
 if not article_url.startswith("http"):
     article_url = "https://www.bbc.com" + article_url
 
-# Feature images
-img_divs = first_article.find_all("div", class_="bbc-1gbs0ve")
+# Image(s)
 image_urls = []
-for div in img_divs:
-    img = div.find("img")
-    if img and img.get("src"):
-        image_urls.append(img["src"])
+promo_image_div = first_article.find("div", class_="promo-image")
+if promo_image_div:
+    imgs = promo_image_div.find_all("img")
+    for img in imgs:
+        src = img.get("src")
+        if src:
+            image_urls.append(src)
+
+print("Images found:", image_urls)
 
 # -----------------------------
 # 4️⃣ Duplicate check
