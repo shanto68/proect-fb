@@ -5,10 +5,10 @@ import random
 import requests
 from bs4 import BeautifulSoup
 import google.generativeai as genai
-from urllib.parse import urljoin
 import firebase_admin
 from firebase_admin import credentials, db
-import base64, tempfile
+import base64
+import tempfile
 
 # -----------------------------
 # 1️⃣ Configuration
@@ -17,12 +17,11 @@ URL = os.environ.get("NEWS_LIST_URL", "https://www.bbc.com/bengali/topics/c90734
 FB_PAGE_ID = os.environ.get("FB_PAGE_ID")
 FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 GEN_API_KEY = os.environ.get("GEMINI_API_KEY")
-FIREBASE_KEY_JSON = os.environ.get("FIREBASE_KEY_JSON")  # base64 encoded service account JSON
-FIREBASE_DB_URL = os.environ.get("FIREBASE_DB_URL")      # Realtime DB URL
+FIREBASE_KEY_JSON = os.environ.get("FIREBASE_KEY_JSON")  # base64 encoded
+FIREBASE_DB_URL = os.environ.get("FIREBASE_DB_URL")
 MAX_IMAGES = int(os.environ.get("MAX_IMAGES", 4))
 POST_AS_CAROUSEL = os.environ.get("POST_AS_CAROUSEL", "true").lower() == "true"
-TIMEOUT = 160  # Increased timeout
-RETRIES = 3
+TIMEOUT = 60  # seconds
 
 # -----------------------------
 # Check configs
@@ -58,38 +57,34 @@ def safe_gemini_text(resp):
         parts = getattr(cand, "content", getattr(cand, "contents", None))
         if parts and hasattr(parts, "parts"):
             return parts.parts[0].text.strip()
-        if hasattr(cand, "content") and isinstance(cand.content, list):
-            return cand.content[0].text.strip()
     except Exception:
         pass
     return ""
 
-def get_soup(url, retries=RETRIES):
+def get_soup(url):
     headers = {"User-Agent": "Mozilla/5.0"}
-    for attempt in range(retries):
-        try:
-            r = requests.get(url, timeout=TIMEOUT, headers=headers)
-            r.raise_for_status()
-            return BeautifulSoup(r.content, "html.parser")
-        except requests.exceptions.RequestException as e:
-            print(f"⚠️ Attempt {attempt+1} failed: {e}")
-            time.sleep(5)
-    print("❌ All attempts failed.")
-    return None
+    try:
+        r = requests.get(url, timeout=TIMEOUT, headers=headers)
+        r.raise_for_status()
+        return BeautifulSoup(r.content, "html.parser")
+    except Exception as e:
+        print("❌ Failed to fetch URL:", e)
+        return None
 
 def extract_listing_first_article(list_url):
     soup = get_soup(list_url)
     if not soup:
         return None
-    # Updated selector for BBC Bangla top article
-    first = soup.select_one("div[data-entityid='container-top-stories#1'] a")
-    if not first:
+    first_article = soup.select_one("li.bbc-1fxtbkn a")  # Current selector
+    if not first_article:
         return None
-    title = first.get_text(strip=True)
-    href = first.get("href", "").strip()
-    article_url = urljoin("https://www.bbc.com", href)
-    img_tag = first.find("img")
-    feature_image = img_tag.get("src") if img_tag else None
+    title_tag = first_article.find("h3")
+    title = title_tag.get_text(strip=True) if title_tag else first_article.get_text(strip=True)
+    article_url = first_article.get("href")
+    if not article_url.startswith("http"):
+        article_url = "https://www.bbc.com" + article_url
+    img_tag = first_article.find("img")
+    feature_image = img_tag["src"] if img_tag else None
     return {"title": title, "url": article_url, "feature_image": feature_image}
 
 def extract_article_images(article_url, max_images=4):
@@ -171,10 +166,6 @@ print("\nGenerated FB Content:\n", message)
 # -----------------------------
 # Post to Facebook
 # -----------------------------
-if not FB_PAGE_ID or not FB_ACCESS_TOKEN:
-    print("❌ FB credentials missing.")
-    raise SystemExit(1)
-
 uploaded_media_ids = []
 for idx, img_url in enumerate(images):
     try:
