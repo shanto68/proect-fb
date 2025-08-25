@@ -2,13 +2,18 @@ import os
 import json
 import time
 import random
+import base64
+import tempfile
 import requests
 from bs4 import BeautifulSoup
 import google.generativeai as genai
 import firebase_admin
 from firebase_admin import credentials, db
-import base64
-import tempfile
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 # -----------------------------
 # 1️⃣ Configuration
@@ -21,7 +26,7 @@ FIREBASE_KEY_JSON = os.environ.get("FIREBASE_KEY_JSON")  # base64 encoded
 FIREBASE_DB_URL = os.environ.get("FIREBASE_DB_URL")
 MAX_IMAGES = int(os.environ.get("MAX_IMAGES", 4))
 POST_AS_CAROUSEL = os.environ.get("POST_AS_CAROUSEL", "true").lower() == "true"
-TIMEOUT = 60  # seconds
+TIMEOUT = 60
 
 # -----------------------------
 # Check configs
@@ -47,8 +52,14 @@ genai.configure(api_key=GEN_API_KEY)
 model = genai.GenerativeModel("gemini-2.5-flash")
 
 # -----------------------------
-# Helpers
+# Selenium setup
 # -----------------------------
+chrome_options = Options()
+chrome_options.add_argument("--headless")
+chrome_options.add_argument("--no-sandbox")
+chrome_options.add_argument("--disable-dev-shm-usage")
+driver = webdriver.Chrome(options=chrome_options)
+
 def safe_gemini_text(resp):
     try:
         if hasattr(resp, "text") and resp.text:
@@ -61,37 +72,34 @@ def safe_gemini_text(resp):
         pass
     return ""
 
-def get_soup(url):
-    headers = {"User-Agent": "Mozilla/5.0"}
+def get_latest_article(url):
+    driver.get(url)
     try:
-        r = requests.get(url, timeout=TIMEOUT, headers=headers)
-        r.raise_for_status()
-        return BeautifulSoup(r.content, "html.parser")
+        # wait for main article to load
+        main_li = WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "li.bbc-1fxtbkn"))
+        )
+        soup = BeautifulSoup(driver.page_source, "html.parser")
+        first_article = soup.select_one("li.bbc-1fxtbkn a")
+        if not first_article:
+            return None
+        title_tag = first_article.find("h3")
+        title = title_tag.get_text(strip=True) if title_tag else first_article.get_text(strip=True)
+        article_url = first_article.get("href")
+        if not article_url.startswith("http"):
+            article_url = "https://www.bbc.com" + article_url
+        img_tag = first_article.find("img")
+        feature_image = img_tag["src"] if img_tag else None
+        return {"title": title, "url": article_url, "feature_image": feature_image}
     except Exception as e:
-        print("❌ Failed to fetch URL:", e)
+        print("❌ Error fetching article:", e)
         return None
-
-def extract_listing_first_article(list_url):
-    soup = get_soup(list_url)
-    if not soup:
-        return None
-    first_article = soup.select_one("li.bbc-1fxtbkn a")  # Current selector
-    if not first_article:
-        return None
-    title_tag = first_article.find("h3")
-    title = title_tag.get_text(strip=True) if title_tag else first_article.get_text(strip=True)
-    article_url = first_article.get("href")
-    if not article_url.startswith("http"):
-        article_url = "https://www.bbc.com" + article_url
-    img_tag = first_article.find("img")
-    feature_image = img_tag["src"] if img_tag else None
-    return {"title": title, "url": article_url, "feature_image": feature_image}
 
 def extract_article_images(article_url, max_images=4):
+    driver.get(article_url)
+    time.sleep(3)
+    soup = BeautifulSoup(driver.page_source, "html.parser")
     imgs = []
-    soup = get_soup(article_url)
-    if not soup:
-        return imgs
     for tag in soup.select("article img, figure img, .ssrcss-uf6wea-RichTextComponentWrapper img"):
         src = tag.get("src") or tag.get("data-src")
         if src and src.startswith("http") and src not in imgs:
@@ -103,9 +111,10 @@ def extract_article_images(article_url, max_images=4):
 # -----------------------------
 # Scrape latest article
 # -----------------------------
-item = extract_listing_first_article(URL)
+item = get_latest_article(URL)
 if not item:
     print("❌ No article found. Exiting.")
+    driver.quit()
     raise SystemExit(0)
 
 title = item['title']
@@ -116,6 +125,7 @@ feature_image = item.get('feature_image')
 posted_list = ref.get() or []
 if article_url in posted_list:
     print("❌ Duplicate detected in Firebase. Skipping post.")
+    driver.quit()
     raise SystemExit(0)
 
 images = extract_article_images(article_url, MAX_IMAGES)
@@ -134,6 +144,7 @@ summary_prompt = f"""
 summary_text = safe_gemini_text(model.generate_content(summary_prompt))
 if not summary_text:
     print("❌ Gemini summary generate হয়নি।")
+    driver.quit()
     raise SystemExit(0)
 
 caption_prompt = f"""
@@ -209,5 +220,5 @@ if "id" in result:
     print(f"🎉 Post Successful! Post ID: {result['id']}")
     posted_list.append(article_url)
     ref.set(posted_list)
-else:
-    print("❌ Post failed. Check logs.")
+
+driver.quit()
