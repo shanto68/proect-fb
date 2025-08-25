@@ -10,14 +10,23 @@ from urllib.parse import quote
 # Utils
 # -----------------------------
 def check_duplicate(title):
-    """Check if article title is duplicate using botlink.gt.tc"""
+    """Check if article title is duplicate using botlink.gt.tc with debug prints"""
+    encoded_title = quote(title)
+    print("🔹 Original Article Title:", title)
+    print("🔹 Encoded Title for Botlink:", encoded_title)
+    
     try:
-        encoded_title = quote(title)
         resp = requests.get(f"https://botlink.gt.tc/?urlcheck={encoded_title}", timeout=10, verify=False)
+        print("🔹 Botlink Response snippet:", resp.text[:300])  # first 300 chars
         if "duplicate.php" in resp.text:
+            print("✅ Detected as DUPLICATE")
             return True
         elif "unique.php" in resp.text:
+            print("✅ Detected as UNIQUE, submitting link...")
             requests.get(f"https://botlink.gt.tc/?urlsubmit={encoded_title}", timeout=10, verify=False)
+            return False
+        else:
+            print("⚠️ Response unclear, assuming not duplicate")
             return False
     except Exception as e:
         print("❌ Duplicate check failed:", e)
