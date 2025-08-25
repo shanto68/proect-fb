@@ -7,7 +7,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from PIL import Image
 from io import BytesIO
 import random
-
+ 
 # -----------------------------
 # 1️⃣ Configuration
 # -----------------------------
