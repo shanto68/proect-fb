@@ -8,6 +8,7 @@ import google.generativeai as genai
 from urllib.parse import urljoin
 import firebase_admin
 from firebase_admin import credentials, db
+import base64, tempfile
 
 # -----------------------------
 # 1️⃣ Configuration
@@ -18,43 +19,36 @@ FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 GEN_API_KEY = os.environ.get("GEMINI_API_KEY")
 FIREBASE_KEY_JSON = os.environ.get("FIREBASE_KEY_JSON")  # base64 encoded service account JSON
 FIREBASE_DB_URL = os.environ.get("FIREBASE_DB_URL")  # Realtime DB URL
-MAX_IMAGES = int(os.environ.get("MAX_IMAGES", 4))  # কতগুলো ছবি পোস্ট করবে (1..4)
+MAX_IMAGES = int(os.environ.get("MAX_IMAGES", 4))
 POST_AS_CAROUSEL = os.environ.get("POST_AS_CAROUSEL", "true").lower() == "true"
-TIMEOUT = 20
+TIMEOUT = 160  # increased from 20
+RETRIES = 3
 
 # -----------------------------
-# Install/check firebase-admin
+# Check configs
 # -----------------------------
-try:
-    import firebase_admin
-except ImportError:
-    import subprocess
-    subprocess.check_call(["python", "-m", "pip", "install", "firebase-admin"])
-    import firebase_admin
-
-# Gemini init
-if not GEN_API_KEY:
-    print("❌ GEMINI_API_KEY missing.")
+if not all([FB_PAGE_ID, FB_ACCESS_TOKEN, GEN_API_KEY, FIREBASE_KEY_JSON, FIREBASE_DB_URL]):
+    print("❌ Missing required environment variables.")
     raise SystemExit(1)
 
-genai.configure(api_key=GEN_API_KEY)
-model = genai.GenerativeModel("gemini-2.5-flash")
-
+# -----------------------------
 # Firebase init
-import base64, tempfile
-if not FIREBASE_KEY_JSON or not FIREBASE_DB_URL:
-    print("❌ Firebase config missing.")
-    raise SystemExit(1)
-key_bytes = base64.b64decode(FIREBASE_KEY_JSON)
+# -----------------------------
 temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
-temp_file.write(key_bytes)
+temp_file.write(base64.b64decode(FIREBASE_KEY_JSON))
 temp_file.close()
 cred = credentials.Certificate(temp_file.name)
 firebase_admin.initialize_app(cred, {'databaseURL': FIREBASE_DB_URL})
 ref = db.reference('posted_articles')
 
 # -----------------------------
-# 2️⃣ Helpers
+# Gemini init
+# -----------------------------
+genai.configure(api_key=GEN_API_KEY)
+model = genai.GenerativeModel("gemini-2.5-flash")
+
+# -----------------------------
+# Helpers
 # -----------------------------
 
 def safe_gemini_text(resp):
@@ -72,16 +66,24 @@ def safe_gemini_text(resp):
     return ""
 
 
-def get_soup(url):
-    r = requests.get(url, timeout=TIMEOUT, headers={
-        "User-Agent": "Mozilla/5.0"
-    })
-    r.raise_for_status()
-    return BeautifulSoup(r.content, "html.parser")
+def get_soup(url, retries=RETRIES):
+    headers = {"User-Agent": "Mozilla/5.0"}
+    for attempt in range(retries):
+        try:
+            r = requests.get(url, timeout=TIMEOUT, headers=headers)
+            r.raise_for_status()
+            return BeautifulSoup(r.content, "html.parser")
+        except requests.exceptions.RequestException as e:
+            print(f"⚠️ Attempt {attempt+1} failed: {e}")
+            time.sleep(5)
+    print("❌ All attempts failed.")
+    return None
 
 
 def extract_listing_first_article(list_url):
     soup = get_soup(list_url)
+    if not soup:
+        return None
     candidates = ["li.bbc-t44f9r", "li[data-testid='edinburgh-card']"]
     first = None
     for sel in candidates:
@@ -103,20 +105,19 @@ def extract_listing_first_article(list_url):
 
 def extract_article_images(article_url, max_images=4):
     imgs = []
-    try:
-        soup = get_soup(article_url)
-        for tag in soup.select("article img, figure img, .ssrcss-uf6wea-RichTextComponentWrapper img"):
-            src = tag.get("src") or tag.get("data-src")
-            if src and src.startswith("http") and src not in imgs:
-                imgs.append(src)
-            if len(imgs) >= max_images:
-                break
-    except Exception as e:
-        print("⚠️ Image parse error:", e)
+    soup = get_soup(article_url)
+    if not soup:
+        return imgs
+    for tag in soup.select("article img, figure img, .ssrcss-uf6wea-RichTextComponentWrapper img"):
+        src = tag.get("src") or tag.get("data-src")
+        if src and src.startswith("http") and src not in imgs:
+            imgs.append(src)
+        if len(imgs) >= max_images:
+            break
     return imgs
 
 # -----------------------------
-# 3️⃣ Scrape latest article
+# Scrape latest article
 # -----------------------------
 item = extract_listing_first_article(URL)
 if not item:
@@ -139,7 +140,7 @@ if feature_image and feature_image not in images:
 images = images[:MAX_IMAGES] if images else ([] if not feature_image else [feature_image])
 
 # -----------------------------
-# 4️⃣ Generate content (Summary, Variations, Hashtags)
+# Generate content (Summary, Captions, Hashtags)
 # -----------------------------
 summary_prompt = f"""
 তুমি একজন সোশ্যাল মিডিয়া কপিরাইটার। নিচের নিউজের জন্য ২–৩ লাইনের ছোট বাংলা সারাংশ লিখো।
@@ -179,49 +180,53 @@ message = f"{selected_caption}\n\n{hashtags}".strip()
 print("\nGenerated FB Content:\n", message)
 
 # -----------------------------
-# 5️⃣ Post to Facebook (Photo upload / Carousel)
+# Post to Facebook
 # -----------------------------
 if not FB_PAGE_ID or not FB_ACCESS_TOKEN:
     print("❌ FB credentials missing.")
     raise SystemExit(1)
 
 uploaded_media_ids = []
-if images:
-    for idx, img_url in enumerate(images):
-        try:
-            resp = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos", data={"url": img_url, "published": False, "access_token": FB_ACCESS_TOKEN}, timeout=TIMEOUT)
-            data = resp.json()
-            if resp.status_code == 200 and "id" in data:
-                uploaded_media_ids.append(data["id"])
-                print(f"✅ Uploaded image {idx+1}/{len(images)}")
-            else:
-                print("⚠️ Photo upload failed:", data)
-        except Exception as e:
-            print("⚠️ Photo upload error:", e)
+for idx, img_url in enumerate(images):
+    try:
+        resp = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos", 
+                             data={"url": img_url, "published": False, "access_token": FB_ACCESS_TOKEN}, timeout=TIMEOUT)
+        data = resp.json()
+        if resp.status_code == 200 and "id" in data:
+            uploaded_media_ids.append(data["id"])
+            print(f"✅ Uploaded image {idx+1}/{len(images)}")
+        else:
+            print("⚠️ Photo upload failed:", data)
+    except Exception as e:
+        print("⚠️ Photo upload error:", e)
 
-# Post to FB
+# Publish post
 if not uploaded_media_ids:
-    print("ℹ️ Fallback to link post.")
-    result = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed", data={"message": message, "link": article_url, "access_token": FB_ACCESS_TOKEN}, timeout=TIMEOUT).json()
+    result = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed", 
+                           data={"message": message, "link": article_url, "access_token": FB_ACCESS_TOKEN}, timeout=TIMEOUT).json()
 else:
     if POST_AS_CAROUSEL and len(uploaded_media_ids) > 1:
+        # Carousel style post
         payload = {"message": message, "access_token": FB_ACCESS_TOKEN}
-        multipart = [(f"attached_media[{i}]", json.dumps({"media_fbid": mid})) for i, mid in enumerate(uploaded_media_ids)]
-        req = requests.Request("POST", f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed", data=payload, files=multipart).prepare()
-        s = requests.Session()
-        result = s.send(req, timeout=TIMEOUT).json()
+        for i, mid in enumerate(uploaded_media_ids):
+            payload[f"attached_media[{i}]"] = json.dumps({"media_fbid": mid})
+        result = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed",
+                               data=payload, timeout=TIMEOUT).json()
     else:
-        first_media = uploaded_media_ids[0]
-        result = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos", data={"caption": message, "access_token": FB_ACCESS_TOKEN, "object_attachment": first_media, "published": True}, timeout=TIMEOUT).json()
+        # Single photo post
+        result = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed",
+                               data={"message": message,
+                                     "attached_media[0]": json.dumps({"media_fbid": uploaded_media_ids[0]}),
+                                     "access_token": FB_ACCESS_TOKEN}, timeout=TIMEOUT).json()
 
 print("Facebook Response:", result)
 
 # -----------------------------
-# 6️⃣ Log successful post to Firebase
+# Log successful post in Firebase
 # -----------------------------
-if isinstance(result, dict) and "id" in result:
+if "id" in result:
     print(f"🎉 Post Successful! Post ID: {result['id']}")
     posted_list.append(article_url)
     ref.set(posted_list)
 else:
-    print("❌ Post failed or no ID returned.")
+    print("❌ Post failed. Check logs.")
