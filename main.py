@@ -65,8 +65,8 @@ Include:
 - relevant hashtags
 """
 
-model = genai.get_model("gemini-2.5-flash")  # get_model
-response = model.generate_content(prompt)     # generate_content
+model = genai.get_model("gemini-2.5-flash")
+response = model.generate_text(prompt)  # ✅ use generate_text
 
 fb_content = response.result[0].content
 print("Generated FB Content:\n", fb_content)
