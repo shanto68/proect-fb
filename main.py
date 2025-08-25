@@ -4,18 +4,20 @@ import random
 import requests
 from bs4 import BeautifulSoup
 import google.generativeai as genai
+from urllib.parse import quote
 
 # -----------------------------
 # Utils
 # -----------------------------
-def check_duplicate(url):
-    """Check if URL is duplicate using botlink.gt.tc"""
+def check_duplicate(title):
+    """Check if article title is duplicate using botlink.gt.tc"""
     try:
-        resp = requests.get(f"https://botlink.gt.tc/?urlcheck={url}", timeout=10, verify=False)
+        encoded_title = quote(title)
+        resp = requests.get(f"https://botlink.gt.tc/?urlcheck={encoded_title}", timeout=10, verify=False)
         if "duplicate.php" in resp.text:
             return True
         elif "unique.php" in resp.text:
-            requests.get(f"https://botlink.gt.tc/?urlsubmit={url}", timeout=10, verify=False)
+            requests.get(f"https://botlink.gt.tc/?urlsubmit={encoded_title}", timeout=10, verify=False)
             return False
     except Exception as e:
         print("❌ Duplicate check failed:", e)
@@ -51,7 +53,7 @@ LOG_FILE = "posted_articles.json"
 genai.configure(api_key=GEN_API_KEY)
 
 # -----------------------------
-# 2️⃣ Load posted articles
+# 2️⃣ Load posted articles (titles)
 # -----------------------------
 try:
     with open(LOG_FILE, "r") as f:
@@ -70,7 +72,7 @@ if not first_article:
     print("❌ No article found. Exiting.")
     exit()
 
-# Title
+# Title & URL
 title_tag = first_article.find("h2", class_="bbc-qqcsu8")
 title = title_tag.get_text(strip=True)
 article_url = title_tag.find("a")["href"]
@@ -85,17 +87,15 @@ if promo_image_div:
     for img in imgs:
         srcset = img.get("srcset")
         if srcset:
-            # srcset থেকে সর্বোচ্চ width image নির্বাচন
             candidates = []
             for part in srcset.split(","):
                 url_part, size_part = part.strip().split(" ")
                 width = int(size_part.replace("w", ""))
                 candidates.append((width, url_part))
-            candidates.sort(reverse=True)  # descending by width
+            candidates.sort(reverse=True)
             high_res_url = candidates[0][1]
             image_urls.append(high_res_url)
         else:
-            # যদি srcset না থাকে, src ব্যবহার কর
             src = img.get("src")
             if src:
                 image_urls.append(src)
@@ -103,9 +103,9 @@ if promo_image_div:
 print("High-res Images found:", image_urls)
 
 # -----------------------------
-# 4️⃣ Duplicate check
+# 4️⃣ Duplicate check (title-based)
 # -----------------------------
-if article_url in posted_articles or check_duplicate(article_url):
+if title in posted_articles or check_duplicate(title):
     print("❌ Already posted or duplicate. Skipping.")
     exit()
 
@@ -125,19 +125,11 @@ Include emojis naturally
 summary_resp = model.generate_content(summary_prompt)
 summary_text = summary_resp.text.strip()
 
-# Headline variations
-headline_prompt = f"""
-Generate 3 catchy Facebook headlines for this article:
-Title: {title}
-Language: Bengali
-Friendly, punchy, scroll-stopping
-Include emojis
-"""
-headline_resp = model.generate_content(headline_prompt)
-headline_list = [line.strip() for line in headline_resp.text.split("\n") if line.strip()]
-headline = random.choice(headline_list) if headline_list else title
+# Keyword highlighting
+keywords = title.split()[:3]  # first 3 words example
+highlighted_text = highlight_keywords(summary_text, keywords)
 
-# Auto hashtag generation
+# Hashtags
 hashtag_prompt = f"""
 Generate 3-5 relevant Bengali hashtags for this news article.
 Title: {title}
@@ -147,12 +139,8 @@ hashtag_resp = model.generate_content(hashtag_prompt)
 hashtags = [tag.strip() for tag in hashtag_resp.text.split() if tag.startswith("#")]
 hashtags_text = " ".join(hashtags)
 
-# Keyword highlighting (using emojis)
-keywords = title.split()[:3]  # first 3 words as sample keywords
-highlighted_text = highlight_keywords(summary_text, keywords)
-
-# Final FB post content
-fb_content = f"{headline}\n\n{highlighted_text}\n\n{hashtags_text}"
+# Final FB post content (headline suggestions NOT added)
+fb_content = f"{highlighted_text}\n\n{hashtags_text}"
 print("Generated FB Content:\n", fb_content)
 
 # -----------------------------
@@ -185,8 +173,8 @@ else:
 print("Facebook Response:", fb_result)
 
 # -----------------------------
-# 8️⃣ Log successful post
+# 8️⃣ Log successful post (title)
 # -----------------------------
-posted_articles.append(article_url)
+posted_articles.append(title)
 with open(LOG_FILE, "w") as f:
     json.dump(posted_articles, f)
