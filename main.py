@@ -9,21 +9,17 @@ import google.generativeai as genai
 # Utils
 # -----------------------------
 def check_duplicate(url):
-    """
-    Check if URL is duplicate using botlink.gt.tc
-    Returns True if duplicate, False if unique
-    """
+    """Check if URL is duplicate using botlink.gt.tc"""
     try:
         resp = requests.get(f"https://botlink.gt.tc/?urlcheck={url}", timeout=10, verify=False)
         if "duplicate.php" in resp.text:
             return True
         elif "unique.php" in resp.text:
-            # Submit URL if unique
             requests.get(f"https://botlink.gt.tc/?urlsubmit={url}", timeout=10, verify=False)
             return False
     except Exception as e:
         print("❌ Duplicate check failed:", e)
-        return False  # skip check if fail
+        return False
 
 def download_image(url, filename):
     try:
@@ -151,22 +147,22 @@ for i, url in enumerate(image_urls):
         local_images.append(filename)
 
 # -----------------------------
-# 7️⃣ Post to Facebook
+# 7️⃣ Post to Facebook (Photo Only, No Link)
 # -----------------------------
 fb_api_url = f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos"
 
+fb_result = []
 if local_images:
-    fb_result = []
     for idx, img_file in enumerate(local_images):
         data = {"caption": fb_content if idx == 0 else "", "access_token": FB_ACCESS_TOKEN}
         files = {"source": open(img_file, "rb")}
         r = requests.post(fb_api_url, data=data, files=files)
         fb_result.append(r.json())
 else:
-    # fallback to link post if no images
-    post_data = {"message": fb_content, "link": article_url, "access_token": FB_ACCESS_TOKEN}
+    # fallback: text-only post
+    post_data = {"message": fb_content, "access_token": FB_ACCESS_TOKEN}
     r = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed", data=post_data)
-    fb_result = r.json()
+    fb_result.append(r.json())
 
 print("Facebook Response:", fb_result)
 
