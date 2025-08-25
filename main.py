@@ -19,13 +19,13 @@ LOG_FILE = "posted_articles.json"
 genai.configure(api_key=GEN_API_KEY)
 
 # -----------------------------
-# 2️⃣ Load previously posted articles
+# 2️⃣ Load previously posted articles (auto create if not exist)
 # -----------------------------
 try:
     with open(LOG_FILE, "r") as f:
         posted_articles = json.load(f)
 except:
-    posted_articles = []
+    posted_articles = []   # প্রথমবার হলে empty list হবে
 
 # -----------------------------
 # 3️⃣ Scrape latest article
@@ -50,14 +50,14 @@ img_tag = img_div.find("img") if img_div else None
 feature_image = img_tag["src"] if img_tag else None
 
 # -----------------------------
-# 4️⃣ Duplicate Handling (URL-based)
+# 4️⃣ Duplicate Handling (URL-based only)
 # -----------------------------
 if article_url in posted_articles:
     print("❌ Already posted. Exiting.")
     exit()
 
 # -----------------------------
-# 5️⃣ Scrape article body for summary
+# 5️⃣ Scrape article body (for summary & hashtags)
 # -----------------------------
 article_body = soup.find("div", class_="ssrcss-uf6wea-RichTextComponentWrapper")
 article_text = article_body.get_text(separator=" ", strip=True) if article_body else ""
@@ -129,7 +129,7 @@ fb_result = fb_response.json()
 print("Facebook Response:", fb_result)
 
 # -----------------------------
-# 9️⃣ Log successful post
+# 9️⃣ Log successful post (auto create posted_articles.json)
 # -----------------------------
 if "id" in fb_result:
     print(f"🎉 Post Successful! Post ID: {fb_result['id']}")
