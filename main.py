@@ -1,6 +1,5 @@
 import os
 import json
-import random
 import requests
 from bs4 import BeautifulSoup
 import google.generativeai as genai
@@ -17,7 +16,7 @@ def check_duplicate(title):
     
     try:
         resp = requests.get(f"https://botlink.gt.tc/?urlcheck={encoded_title}", timeout=10, verify=False)
-        print("🔹 Botlink Response snippet:", resp.text[:300])  # first 300 chars
+        print("🔹 Botlink Response snippet:", resp.text[:300])
         if "duplicate.php" in resp.text:
             print("✅ Detected as DUPLICATE")
             return True
@@ -49,6 +48,19 @@ def highlight_keywords(text, keywords):
         if kw in text:
             text = text.replace(kw, f"⚡{kw}⚡")
     return text
+
+def post_fb_comment(post_id, comment_text):
+    """Post a comment on a Facebook photo post"""
+    fb_comment_url = f"https://graph.facebook.com/v17.0/{post_id}/comments"
+    data = {"message": comment_text, "access_token": FB_ACCESS_TOKEN}
+    try:
+        resp = requests.post(fb_comment_url, data=data)
+        result = resp.json()
+        print("Comment Response:", result)
+        return result
+    except Exception as e:
+        print("❌ Comment failed:", e)
+        return None
 
 # -----------------------------
 # 1️⃣ Configuration
@@ -135,7 +147,7 @@ summary_resp = model.generate_content(summary_prompt)
 summary_text = summary_resp.text.strip()
 
 # Keyword highlighting
-keywords = title.split()[:3]  # first 3 words example
+keywords = title.split()[:3]
 highlighted_text = highlight_keywords(summary_text, keywords)
 
 # Hashtags
@@ -148,7 +160,7 @@ hashtag_resp = model.generate_content(hashtag_prompt)
 hashtags = [tag.strip() for tag in hashtag_resp.text.split() if tag.startswith("#")]
 hashtags_text = " ".join(hashtags)
 
-# Final FB post content (headline suggestions NOT added)
+# Final FB post content
 fb_content = f"{highlighted_text}\n\n{hashtags_text}"
 print("Generated FB Content:\n", fb_content)
 
@@ -165,7 +177,6 @@ for i, url in enumerate(image_urls):
 # 7️⃣ Post to Facebook (Photo Only, No Link)
 # -----------------------------
 fb_api_url = f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos"
-
 fb_result = []
 if local_images:
     for idx, img_file in enumerate(local_images):
@@ -174,7 +185,6 @@ if local_images:
         r = requests.post(fb_api_url, data=data, files=files)
         fb_result.append(r.json())
 else:
-    # fallback: text-only post
     post_data = {"message": fb_content, "access_token": FB_ACCESS_TOKEN}
     r = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed", data=post_data)
     fb_result.append(r.json())
@@ -182,7 +192,24 @@ else:
 print("Facebook Response:", fb_result)
 
 # -----------------------------
-# 8️⃣ Log successful post (title)
+# 8️⃣ Auto-comment on first image
+# -----------------------------
+if local_images and fb_result:
+    first_post_id = fb_result[0].get("id")
+    if first_post_id:
+        comment_prompt = f"""
+        Article Title: {title}
+        Summary: {summary_text}
+        Write a short, friendly, engaging, and scroll-stopping comment in Bengali for this Facebook post.
+        Include emojis naturally.
+        """
+        comment_resp = model.generate_content(comment_prompt)
+        comment_text = comment_resp.text.strip()
+        print("Generated Comment:\n", comment_text)
+        post_fb_comment(first_post_id, comment_text)
+
+# -----------------------------
+# 9️⃣ Log successful post (title)
 # -----------------------------
 posted_articles.append(title)
 with open(LOG_FILE, "w") as f:
