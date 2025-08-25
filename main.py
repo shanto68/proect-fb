@@ -15,7 +15,9 @@ latest_title = feed.entries[0].title
 
 # 2) Gemini API দিয়ে নিউজ বানানো
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("text-bison-001")  # gemini-pro এর পরিবর্তে
+models = genai.list_models()
+for model in models:
+    print(model["name"], model["available_methods"])
 prompt = f"এই টাইটেল থেকে আকর্ষণীয় নিউজ লিখুন (মানুষ পড়তে চাইবে এমনভাবে): {latest_title}"
 response = model.generate_content(prompt)
 news_content = response.text
@@ -28,4 +30,5 @@ payload = {
 }
 res = requests.post(post_url, data=payload)
 print(res.json())
+
 
