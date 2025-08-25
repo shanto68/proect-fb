@@ -4,7 +4,44 @@ import random
 import requests
 from bs4 import BeautifulSoup
 import google.generativeai as genai
-from utils import check_duplicate, download_image
+
+# -----------------------------
+# Utils
+# -----------------------------
+def check_duplicate(url):
+    """
+    Check if URL is duplicate using botlink.gt.tc
+    Returns True if duplicate, False if unique
+    """
+    try:
+        resp = requests.get(f"https://botlink.gt.tc/?urlcheck={url}", timeout=10, verify=False)
+        if "duplicate.php" in resp.text:
+            return True
+        elif "unique.php" in resp.text:
+            # Submit URL if unique
+            requests.get(f"https://botlink.gt.tc/?urlsubmit={url}", timeout=10, verify=False)
+            return False
+    except Exception as e:
+        print("❌ Duplicate check failed:", e)
+        return False  # skip check if fail
+
+def download_image(url, filename):
+    try:
+        r = requests.get(url, stream=True, timeout=10)
+        if r.status_code == 200:
+            with open(filename, 'wb') as f:
+                for chunk in r.iter_content(1024):
+                    f.write(chunk)
+            return True
+    except Exception as e:
+        print("❌ Image download failed:", e)
+    return False
+
+def highlight_keywords(text, keywords):
+    for kw in keywords:
+        if kw in text:
+            text = text.replace(kw, f"⚡{kw}⚡")
+    return text
 
 # -----------------------------
 # 1️⃣ Configuration
@@ -61,6 +98,8 @@ if article_url in posted_articles or check_duplicate(article_url):
 # -----------------------------
 # 5️⃣ Generate content with Gemini
 # -----------------------------
+model = genai.GenerativeModel("gemini-2.5-flash")
+
 # Auto summarization
 summary_prompt = f"""
 নিচের নিউজের মূল বিষয়গুলো নিয়ে 2-3 sentence এর আকর্ষণীয় summary বানাও। 
@@ -69,8 +108,7 @@ Language: Bengali
 Tone: Friendly, human-like, eye-catching
 Include emojis naturally
 """
-model = genai.GenerativeModel("gemini-2.5-flash")
-summary_resp = model.generate_text(summary_prompt)
+summary_resp = model.generate_content(summary_prompt)
 summary_text = summary_resp.text.strip()
 
 # Headline variations
@@ -81,7 +119,7 @@ Language: Bengali
 Friendly, punchy, scroll-stopping
 Include emojis
 """
-headline_resp = model.generate_text(headline_prompt)
+headline_resp = model.generate_content(headline_prompt)
 headline_list = [line.strip() for line in headline_resp.text.split("\n") if line.strip()]
 headline = random.choice(headline_list) if headline_list else title
 
@@ -91,23 +129,16 @@ Generate 3-5 relevant Bengali hashtags for this news article.
 Title: {title}
 Summary: {summary_text}
 """
-hashtag_resp = model.generate_text(hashtag_prompt)
+hashtag_resp = model.generate_content(hashtag_prompt)
 hashtags = [tag.strip() for tag in hashtag_resp.text.split() if tag.startswith("#")]
 hashtags_text = " ".join(hashtags)
 
 # Keyword highlighting (using emojis)
-def highlight_keywords(text, keywords):
-    for kw in keywords:
-        if kw in text:
-            text = text.replace(kw, f"⚡{kw}⚡")
-    return text
-
 keywords = title.split()[:3]  # first 3 words as sample keywords
 highlighted_text = highlight_keywords(summary_text, keywords)
 
 # Final FB post content
 fb_content = f"{headline}\n\n{highlighted_text}\n\n{hashtags_text}"
-
 print("Generated FB Content:\n", fb_content)
 
 # -----------------------------
