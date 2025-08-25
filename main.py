@@ -63,14 +63,14 @@ Include:
 
 # Updated Gemini API usage
 model = genai.get_model("gemini-2.5-flash")
-response = model.generate(
+response = model.chat(
     messages=[
         {"role": "user", "content": prompt}
     ]
 )
 
 # Gemini response
-fb_content = response.candidates[0].content
+fb_content = response.last.content
 print("Generated FB Content:\n", fb_content)
 
 # -----------------------------
@@ -100,3 +100,4 @@ if "id" in fb_result:
         json.dump(posted_articles, f)
 else:
     print("❌ Post failed. Check logs.")
+
