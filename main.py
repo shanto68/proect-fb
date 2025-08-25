@@ -66,9 +66,9 @@ Include:
 """
 
 model = genai.get_model("gemini-2.5-flash")
-response = model.generate_text(prompt)  # ✅ use generate_text
+response = model.generate_text(prompt)
+fb_content = response.text.strip()  # ✅ এখানে সরাসরি .text ব্যবহার করা ভালো
 
-fb_content = response.result[0].content
 print("Generated FB Content:\n", fb_content)
 
 # -----------------------------
@@ -77,13 +77,13 @@ print("Generated FB Content:\n", fb_content)
 post_data = {
     "message": fb_content,
     "link": article_url,
-    "picture": feature_image
+    "picture": feature_image,
+    "access_token": FB_ACCESS_TOKEN
 }
 
 fb_response = requests.post(
     f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed",
-    data=post_data,
-    params={"access_token": FB_ACCESS_TOKEN}
+    data=post_data
 )
 fb_result = fb_response.json()
 print("Facebook Response:", fb_result)
