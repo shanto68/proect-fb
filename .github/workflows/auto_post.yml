@@ -1,0 +1,44 @@
+name: Auto Post to FB
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # প্রতি ঘন্টা চালাবে
+  workflow_dispatch:
+
+jobs:
+  post_job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check Firebase Secrets
+        run: |
+          if [ -z "$FIREBASE_KEY_JSON" ]; then
+            echo "❌ FIREBASE_KEY_JSON is empty"
+          else
+            echo "✅ FIREBASE_KEY_JSON loaded"
+          fi
+          if [ -z "$FIREBASE_DB_URL" ]; then
+            echo "❌ FIREBASE_DB_URL is empty"
+          else
+            echo "✅ FIREBASE_DB_URL loaded"
+          fi
+
+      - name: Run Script
+        env:
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FIREBASE_KEY_JSON: ${{ secrets.FIREBASE_KEY_JSON }}
+          FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
+          NEWS_LIST_URL: ${{ secrets.RSS_URL }}
+        run: python main.py
