@@ -23,14 +23,20 @@ jobs:
           pip install -r requirements.txt
           pip install selenium firebase-admin google-generativeai beautifulsoup4 requests
 
+      # -----------------------------
+      # Setup Chrome + ChromeDriver
+      # -----------------------------
       - name: Setup Chrome
         uses: browser-actions/setup-chrome@v1
 
       - name: Setup ChromeDriver
-        uses: actions/setup-chromedriver@v4
+        uses: nanasess/setup-chromedriver@v1
         with:
-          version: 'latest'
+          chromedriver-version: latest
 
+      # -----------------------------
+      # Run Python Script
+      # -----------------------------
       - name: Run Python Script
         env:
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
