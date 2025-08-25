@@ -15,15 +15,14 @@ URL = "https://www.bbc.com/bengali/topics/c907347rezkt"  # Custom URL
 FB_PAGE_ID = os.environ.get("FB_PAGE_ID")
 FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 GEN_API_KEY = os.environ.get("GEMINI_API_KEY")
-FIREBASE_KEY = "firebase_key.json"  # আপনার Firebase key path
-LOG_FILE = "posted_articles.json"
+FIREBASE_KEY_FILE = "firebase_key.json"
 
 # Gemini API configure
 genai.configure(api_key=GEN_API_KEY)
 model = genai.GenerativeModel("gemini-2.5-flash")
 
 # Firebase initialize
-cred = credentials.Certificate(FIREBASE_KEY)
+cred = credentials.Certificate(FIREBASE_KEY_FILE)
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 posts_ref = db.collection("posted_articles")
