@@ -10,43 +10,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # -----------------------------
-      # 1️⃣ Checkout repo
-      # -----------------------------
       - name: Checkout
         uses: actions/checkout@v3
 
-      # -----------------------------
-      # 2️⃣ Setup Python
-      # -----------------------------
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      # -----------------------------
-      # 3️⃣ Install dependencies
-      # -----------------------------
-      - name: Install Python packages
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install selenium firebase-admin google-generativeai beautifulsoup4 requests
+          pip install selenium firebase-admin google-generativeai beautifulsoup4 requests webdriver-manager
 
-      # -----------------------------
-      # 4️⃣ Setup Chrome + ChromeDriver
-      # -----------------------------
       - name: Setup Chrome
         uses: browser-actions/setup-chrome@v1
 
-      - name: Setup ChromeDriver
-        uses: actions/setup-chromedriver@v2
-        with:
-          version: "117.0.5938.92"   # Runner Chrome version অনুযায়ী
-
-      # -----------------------------
-      # 5️⃣ Run Python Script
-      # -----------------------------
       - name: Run Python Script
         env:
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
