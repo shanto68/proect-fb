@@ -5,6 +5,7 @@ import requests
 import google.generativeai as genai
 from utils import check_duplicate, download_image, highlight_keywords, post_fb_comment
 from newspaper import Article
+from bs4 import BeautifulSoup
 
 # -----------------------------
 # 1️⃣ Configuration
@@ -53,66 +54,80 @@ if title in posted_articles or check_duplicate(title):
     exit()
 
 # -----------------------------
-# 5️⃣ Extract Full Content & Images
+# 5️⃣ Extract Full Content
 # -----------------------------
 try:
     article = Article(article_url, language="bn")
     article.download()
     article.parse()
     full_content = article.text
-    top_image = article.top_image
 except Exception as e:
     print("❌ Full content extraction failed:", e)
     full_content = title
-    top_image = None
 
-# Collect candidate images
+# -----------------------------
+# 6️⃣ Fetch candidate images from RSS + Article + HTML
+# -----------------------------
 candidate_images = []
+
+# 1️⃣ RSS media content
 if hasattr(first_entry, "media_content"):
     for media in first_entry.media_content:
         img_url = media.get("url")
         if img_url:
             candidate_images.append(img_url)
-if top_image:
-    candidate_images.append(top_image)
 
+# 2️⃣ Newspaper top image
+if hasattr(article, "top_image") and article.top_image:
+    candidate_images.append(article.top_image)
+
+# 3️⃣ All <img> tags from HTML
+try:
+    html = requests.get(article_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10).text
+    soup = BeautifulSoup(html, "html.parser")
+    for img in soup.find_all("img"):
+        img_url = img.get("src")
+        if img_url and any(img_url.lower().endswith(ext) for ext in [".jpg", ".jpeg", ".webp", ".png"]):
+            candidate_images.append(img_url)
+except Exception as e:
+    print("⚠️ Failed to fetch images from HTML:", e)
+
+# Remove duplicates
+candidate_images = list(dict.fromkeys(candidate_images))
 print("Candidate images found:", candidate_images)
 
 # -----------------------------
-# Auto-detect highest resolution images
+# Pick first valid image
 # -----------------------------
-def pick_high_res(images):
-    scored = []
-    for url in images:
-        try:
-            headers = {"User-Agent": "Mozilla/5.0"}
-            r = requests.head(url, timeout=5, headers=headers, verify=False)
-            size = int(r.headers.get('Content-Length', 0))
-            scored.append((size, url))
-        except:
-            scored.append((0, url))  # fallback
-    if scored:
-        scored.sort(reverse=True)
-        return [url for size, url in scored]
-    return images
+featured_image = None
+for img_url in candidate_images:
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.head(img_url, timeout=5, headers=headers, verify=False)
+        if r.status_code == 200 and 'image' in r.headers.get('Content-Type', ''):
+            featured_image = img_url
+            break
+    except:
+        continue
 
-high_res_images = pick_high_res(candidate_images)
-print("High-res images selected:", high_res_images)
+print("Featured image selected:", featured_image)
 
 # -----------------------------
-# Download images locally
+# Download featured image
 # -----------------------------
-local_images = []
-for idx, img_url in enumerate(high_res_images):
-    filename = f"img_{idx}.jpg"
-    if download_image(img_url, filename):
-        local_images.append(filename)
-    if idx >= 4:  # max 5 images
-        break
-print("Local images downloaded:", local_images)
+local_image = None
+if featured_image:
+    filename = "featured.jpg"
+    if download_image(featured_image, filename):
+        local_image = filename
+        print("✅ Image downloaded:", filename)
+    else:
+        print("❌ Failed to download featured image")
+else:
+    print("⚠️ No valid image found")
 
 # -----------------------------
-# 6️⃣ Generate FB Post Content
+# 7️⃣ Generate FB Post Content
 # -----------------------------
 model = genai.GenerativeModel("gemini-2.5-flash")
 
@@ -124,7 +139,6 @@ human-like ফেসবুক পোস্ট স্টাইলে সাজা
 ---
 {full_content}
 """
-
 summary_resp = model.generate_content(summary_prompt)
 summary_text = summary_resp.text.strip()
 
@@ -146,40 +160,28 @@ fb_content = f"{highlighted_text}\n\n{hashtags_text}"
 print("✅ Generated FB Content:\n", fb_content)
 
 # -----------------------------
-# 7️⃣ Post to Facebook
+# 8️⃣ Post to Facebook (single image)
 # -----------------------------
-fb_api_url = f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos"
 fb_result = []
 
-if local_images:
-    for idx, img_file in enumerate(local_images):
-        with open(img_file, "rb") as f:
-            data = {
-                "access_token": FB_ACCESS_TOKEN,
-                "published": "true" if idx == 0 else "false",
-                "caption": fb_content if idx == 0 else ""
-            }
-            files = {"source": f}
-            r = requests.post(fb_api_url, data=data, files=files)
-            fb_result.append(r.json())
-
-    # Publish remaining images as album
-    if len(local_images) > 1:
-        batch_ids = [res.get("id") for res in fb_result if res.get("id")]
-        for photo_id in batch_ids[1:]:
-            requests.post(
-                f"https://graph.facebook.com/v17.0/{photo_id}",
-                data={"published": "true", "access_token": FB_ACCESS_TOKEN}
-            )
+if local_image:
+    with open(local_image, "rb") as f:
+        data = {
+            "caption": fb_content,
+            "access_token": FB_ACCESS_TOKEN
+        }
+        files = {"source": f}
+        r = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos", data=data, files=files)
+        fb_result.append(r.json())
+        print("📤 Facebook Response:", r.json())
 else:
     post_data = {"message": fb_content, "access_token": FB_ACCESS_TOKEN}
     r = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed", data=post_data)
     fb_result.append(r.json())
-
-print("📤 Facebook Response:", fb_result)
+    print("📤 Facebook Response:", r.json())
 
 # -----------------------------
-# 8️⃣ Auto-comment
+# 9️⃣ Auto-comment
 # -----------------------------
 if fb_result:
     first_post_id = fb_result[0].get("id")
@@ -196,7 +198,7 @@ if fb_result:
         post_fb_comment(first_post_id, comment_text)
 
 # -----------------------------
-# 9️⃣ Log successful post
+# 🔟 Log successful post
 # -----------------------------
 posted_articles.append(title)
 with open(LOG_FILE, "w") as f:
