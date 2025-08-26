@@ -8,6 +8,7 @@ on:
 jobs:
   post_job:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -17,21 +18,13 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install system dependencies (for newspaper3k)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-lxml libxml2 libxml2-dev libxslt1-dev libjpeg-dev zlib1g-dev
-
-      - name: Install Python dependencies
-        run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install lxml[html_clean] newspaper3k
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
       - name: Run Script
         env:
+          RSS_FEED_URL: ${{ secrets.RSS_FEED_URL }}
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
           FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          RSS_FEED_URL: ${{ secrets.RSS_FEED_URL }}
         run: python main.py
