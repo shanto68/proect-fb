@@ -1,10 +1,9 @@
 import os
 import json
-import requests
 import feedparser
 import google.generativeai as genai
 from utils import check_duplicate, download_image, highlight_keywords, post_fb_comment
-from newspaper import Article  # নতুন লাইব্রেরি
+from newspaper import Article
 
 # -----------------------------
 # 1️⃣ Configuration
@@ -59,7 +58,7 @@ try:
     article = Article(article_url, language="bn")
     article.download()
     article.parse()
-    article.nlp()  # optional, summary generate করতে পারেন
+    # article.nlp()  # NLP skip to avoid stopwords_bn.txt error
     full_content = article.text
     main_image = article.top_image
 except Exception as e:
@@ -73,11 +72,10 @@ except Exception as e:
 model = genai.GenerativeModel("gemini-2.5-flash")
 
 summary_prompt = f"""
-নিচের নিউজ কনটেন্টকে বাংলায় বিস্তারিতভাবে এমনভাবে লিখো,
+নিচের নিউজ কনটেন্টকে বাংলায় এমনভাবে সাজাও,
 যেন এটা ফেসবুক পোস্ট হিসেবে ব্যবহার করা যায়। 
 ভাষা হবে সহজবোধ্য, আকর্ষণীয়, human-like, engaging।
-ইমোজি ব্যবহার করবে, পাঠকের সাথে কথা বলার টোনে লিখবে।
-শেষে পাঠককে মন্তব্য করার মতো ছোট প্রশ্ন যোগ করবে।
+ইমোজি ব্যবহার করবে। শেষে পাঠককে মন্তব্য করার মতো ছোট প্রশ্নও যোগ করবে।
 
 নিউজ কনটেন্ট:
 ---
