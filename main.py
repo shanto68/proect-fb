@@ -1,19 +1,24 @@
 import os
 import json
 import requests
+import feedparser
 from bs4 import BeautifulSoup
-from urllib.parse import quote
-from newspaper import Article
 import google.generativeai as genai
+from urllib.parse import quote
 import warnings
 
 # -----------------------------
-#  Utils
+# Ignore HTTPS Warnings
+# -----------------------------
+warnings.filterwarnings("ignore", message="Unverified HTTPS request")
+
+# -----------------------------
+# Utils
 # -----------------------------
 def check_duplicate(title):
-    """Check if article title is duplicate using botlink.gt.tc"""
-    encoded_title = quote(title)
+    """Check duplicate using botlink.gt.tc"""
     try:
+        encoded_title = quote(title)
         resp = requests.get(f"https://botlink.gt.tc/?urlcheck={encoded_title}", timeout=10, verify=False)
         if "duplicate.php" in resp.text:
             return True
@@ -26,7 +31,7 @@ def check_duplicate(title):
 
 def download_image(url, filename):
     try:
-        r = requests.get(url, stream=True, timeout=15)
+        r = requests.get(url, stream=True, timeout=10)
         if r.status_code == 200:
             with open(filename, 'wb') as f:
                 for chunk in r.iter_content(1024):
@@ -43,29 +48,28 @@ def highlight_keywords(text, keywords):
     return text
 
 def post_fb_comment(post_id, comment_text):
+    """Post comment on FB post"""
     fb_comment_url = f"https://graph.facebook.com/v17.0/{post_id}/comments"
     data = {"message": comment_text, "access_token": os.environ.get("FB_ACCESS_TOKEN")}
     try:
         resp = requests.post(fb_comment_url, data=data)
-        return resp.json()
+        print("Comment Response:", resp.json())
     except Exception as e:
         print("❌ Comment failed:", e)
-        return None
 
 # -----------------------------
-#  Configuration
+# Configuration
 # -----------------------------
-RSS_URL = "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx1YlY4U0FtSnVHZ0pDUkNnQVAB?hl=bn&gl=BD&ceid=BD%3Abn"
+RSS_URL = os.environ.get("RSS_URL")  # secret RSS link
 FB_PAGE_ID = os.environ.get("FB_PAGE_ID")
 FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 GEN_API_KEY = os.environ.get("GEMINI_API_KEY")
 LOG_FILE = "posted_articles.json"
 
 genai.configure(api_key=GEN_API_KEY)
-warnings.filterwarnings("ignore", category=UserWarning, module='urllib3')  # HTTPS warnings ignore
 
 # -----------------------------
-#  Load posted articles
+# Load posted articles
 # -----------------------------
 try:
     with open(LOG_FILE, "r") as f:
@@ -74,80 +78,73 @@ except:
     posted_articles = []
 
 # -----------------------------
-#  Scrape latest RSS article
+# Fetch latest RSS entry
 # -----------------------------
-resp = requests.get(RSS_URL)
-soup = BeautifulSoup(resp.content, "xml")
-item = soup.find("item")
-if not item:
-    print("❌ No article found in RSS.")
+feed = feedparser.parse(RSS_URL)
+if not feed.entries:
+    print("❌ No RSS entries found.")
     exit()
 
-title = item.title.text.strip()
-article_url = item.link.text.strip()
+latest_entry = feed.entries[0]
+title = latest_entry.title
+link = latest_entry.link
 
-# Duplicate check
+print("📰 Latest Article:", title)
+print("🔗 URL:", link)
+
 if title in posted_articles or check_duplicate(title):
-    print("❌ Already posted or duplicate. Exiting.")
+    print("❌ Already posted or duplicate. Skipping.")
     exit()
 
 # -----------------------------
-#  Full content extraction using Newspaper
+# Extract full content from article
 # -----------------------------
 try:
-    article = Article(article_url, language='bn')
-    article.download()
-    article.parse()
-    content = article.text.strip()
-    if not content:
-        content = title
-except:
-    content = title
+    resp = requests.get(link, timeout=10)
+    soup = BeautifulSoup(resp.content, "html.parser")
+    paragraphs = soup.find_all("p")
+    content = " ".join([p.get_text() for p in paragraphs if len(p.get_text())>20])
+except Exception as e:
+    print("❌ Full content extraction failed:", e)
+    content = title  # fallback
 
 # -----------------------------
-#  Image detection (high-res first)
+# Extract images
 # -----------------------------
-soup_html = BeautifulSoup(requests.get(article_url, verify=False, timeout=15).content, "html.parser")
-image_urls = []
-for img in soup_html.find_all("img"):
+images = []
+img_tags = soup.find_all("img")
+for img in img_tags:
     srcset = img.get("srcset")
     if srcset:
         candidates = []
         for part in srcset.split(","):
-            try:
-                url_part, size_part = part.strip().split(" ")
-                width = int(size_part.replace("w",""))
-                candidates.append((width, url_part))
-            except: pass
-        if candidates:
-            candidates.sort(reverse=True)
-            image_urls.append(candidates[0][1])
+            url_part, size_part = part.strip().split(" ")
+            width = int(size_part.replace("w", ""))
+            candidates.append((width, url_part))
+        candidates.sort(reverse=True)
+        high_res_url = candidates[0][1]
+        images.append(high_res_url)
     else:
         src = img.get("src")
         if src:
-            image_urls.append(src)
+            images.append(src)
 
-# Download images
-local_images = []
-for i, url in enumerate(image_urls[:5]):  # Max 5 images
-    fname = f"img_{i}.jpg"
-    if download_image(url, fname):
-        local_images.append(fname)
+# Remove duplicates and limit to max 5 images
+images = list(dict.fromkeys(images))[:5]
 
 # -----------------------------
-#  Generate FB content with Gemini
+# Gemini AI summary
 # -----------------------------
 model = genai.GenerativeModel("gemini-2.5-flash")
 
 summary_prompt = f"""
-নিচের নিউজ কনটেন্টকে বাংলায় ৩–৪ লাইনের আকর্ষণীয়, সহজবোধ্য,
-ফেসবুক পোস্ট স্টাইলে সাজাও। ইমোজি ব্যবহার করবে।
+নিচের নিউজ কনটেন্টকে বাংলায় ৩–৪ লাইনের আকর্ষণীয়,
+সহজবোধ্য, ফেসবুক পোস্ট স্টাইলে সাজাও। ইমোজি ব্যবহার করবে।
 Article Content: {content}
 """
-summary_resp = model.generate_content(summary_prompt)
-summary_text = summary_resp.output_text.strip()
 
-# Highlight first 3 keywords from title
+summary_resp = model.generate_content(summary_prompt)
+summary_text = summary_resp.content[0].text.strip()
 highlighted_text = highlight_keywords(summary_text, title.split()[:3])
 
 # Hashtags
@@ -157,21 +154,30 @@ Title: {title}
 Summary: {summary_text}
 """
 hashtag_resp = model.generate_content(hashtag_prompt)
-hashtags = [tag.strip() for tag in hashtag_resp.output_text.split() if tag.startswith("#")]
+hashtags = [tag.strip() for tag in hashtag_resp.content[0].text.split() if tag.startswith("#")]
 hashtags_text = " ".join(hashtags)
 
 fb_content = f"{highlighted_text}\n\n{hashtags_text}"
 
 # -----------------------------
-#  Post to Facebook
+# Download images
+# -----------------------------
+local_images = []
+for i, url in enumerate(images):
+    filename = f"img_{i}.jpg"
+    if download_image(url, filename):
+        local_images.append(filename)
+
+# -----------------------------
+# Post to Facebook
 # -----------------------------
 fb_api_url = f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos"
 fb_result = []
 
 if local_images:
     for idx, img_file in enumerate(local_images):
-        data = {"caption": fb_content if idx==0 else "", "access_token": FB_ACCESS_TOKEN}
-        files = {"source": open(img_file, "rb")}
+        data = {"caption": fb_content if idx == 0 else "", "access_token": FB_ACCESS_TOKEN}
+        files = {"source": open(img_file, 'rb')}
         r = requests.post(fb_api_url, data=data, files=files)
         fb_result.append(r.json())
 else:
@@ -179,10 +185,10 @@ else:
     r = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed", data=post_data)
     fb_result.append(r.json())
 
-print("Facebook Response:", fb_result)
+print("📤 Facebook Response:", fb_result)
 
 # -----------------------------
-#  Auto-comment on first image
+# Auto-comment on first image
 # -----------------------------
 if local_images and fb_result:
     first_post_id = fb_result[0].get("id")
@@ -194,11 +200,12 @@ if local_images and fb_result:
         Include emojis naturally.
         """
         comment_resp = model.generate_content(comment_prompt)
-        comment_text = comment_resp.output_text.strip()
+        comment_text = comment_resp.content[0].text.strip()
+        print("💬 Generated Comment:\n", comment_text)
         post_fb_comment(first_post_id, comment_text)
 
 # -----------------------------
-#  Log posted article
+# Log posted article
 # -----------------------------
 posted_articles.append(title)
 with open(LOG_FILE, "w") as f:
