@@ -56,10 +56,10 @@ if title in posted_articles or check_duplicate(title):
 # 5️⃣ Extract full content
 # -----------------------------
 try:
-    article = Article(article_url, language="bn")
+    article = Article(article_url, language=None)  # Stopwords issue fix
     article.download()
     article.parse()
-    full_content = article.text  # পুরো article content
+    full_content = article.text  # Full article
 except Exception as e:
     print("❌ Full content extraction failed:", e)
     full_content = title
