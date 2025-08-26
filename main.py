@@ -1,80 +1,28 @@
 import os
 import json
 import requests
-from bs4 import BeautifulSoup
+import feedparser
 import google.generativeai as genai
-from urllib.parse import quote
-
-# -----------------------------
-# Utils
-# -----------------------------
-def check_duplicate(title):
-    """Check if article title is duplicate using botlink.gt.tc with debug prints"""
-    encoded_title = quote(title)
-    print("🔹 Original Article Title:", title)
-    print("🔹 Encoded Title for Botlink:", encoded_title)
-    
-    try:
-        resp = requests.get(f"https://botlink.gt.tc/?urlcheck={encoded_title}", timeout=10, verify=False)
-        print("🔹 Botlink Response snippet:", resp.text[:300])
-        if "duplicate.php" in resp.text:
-            print("✅ Detected as DUPLICATE")
-            return True
-        elif "unique.php" in resp.text:
-            print("✅ Detected as UNIQUE, submitting link...")
-            requests.get(f"https://botlink.gt.tc/?urlsubmit={encoded_title}", timeout=10, verify=False)
-            return False
-        else:
-            print("⚠️ Response unclear, assuming not duplicate")
-            return False
-    except Exception as e:
-        print("❌ Duplicate check failed:", e)
-        return False
-
-def download_image(url, filename):
-    try:
-        r = requests.get(url, stream=True, timeout=10)
-        if r.status_code == 200:
-            with open(filename, 'wb') as f:
-                for chunk in r.iter_content(1024):
-                    f.write(chunk)
-            return True
-    except Exception as e:
-        print("❌ Image download failed:", e)
-    return False
-
-def highlight_keywords(text, keywords):
-    for kw in keywords:
-        if kw in text:
-            text = text.replace(kw, f"⚡{kw}⚡")
-    return text
-
-def post_fb_comment(post_id, comment_text):
-    """Post a comment on a Facebook photo post"""
-    fb_comment_url = f"https://graph.facebook.com/v17.0/{post_id}/comments"
-    data = {"message": comment_text, "access_token": FB_ACCESS_TOKEN}
-    try:
-        resp = requests.post(fb_comment_url, data=data)
-        result = resp.json()
-        print("Comment Response:", result)
-        return result
-    except Exception as e:
-        print("❌ Comment failed:", e)
-        return None
+from utils import check_duplicate, download_image, highlight_keywords, post_fb_comment
+from newspaper import Article  # নতুন লাইব্রেরি
 
 # -----------------------------
 # 1️⃣ Configuration
 # -----------------------------
-URL = "https://www.bbc.com/bengali/topics/c907347rezkt"
+RSS_FEED = os.environ.get("RSS_FEED_URL")
 FB_PAGE_ID = os.environ.get("FB_PAGE_ID")
 FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 GEN_API_KEY = os.environ.get("GEMINI_API_KEY")
 LOG_FILE = "posted_articles.json"
 
+if not RSS_FEED:
+    print("❌ RSS_FEED_URL not provided.")
+    exit()
+
 genai.configure(api_key=GEN_API_KEY)
 
 # -----------------------------
-# 2️⃣ Load posted articles (titles)
+# 2️⃣ Load posted articles
 # -----------------------------
 try:
     with open(LOG_FILE, "r") as f:
@@ -83,66 +31,59 @@ except:
     posted_articles = []
 
 # -----------------------------
-# 3️⃣ Scrape latest article & high-res images
+# 3️⃣ Fetch RSS feed
 # -----------------------------
-response = requests.get(URL)
-soup = BeautifulSoup(response.content, "html.parser")
-
-first_article = soup.find("li", class_="bbc-t44f9r")
-if not first_article:
-    print("❌ No article found. Exiting.")
+feed = feedparser.parse(RSS_FEED)
+if not feed.entries:
+    print("❌ No RSS entries found.")
     exit()
 
-# Title & URL
-title_tag = first_article.find("h2", class_="bbc-qqcsu8")
-title = title_tag.get_text(strip=True)
-article_url = title_tag.find("a")["href"]
-if not article_url.startswith("http"):
-    article_url = "https://www.bbc.com" + article_url
+first_entry = feed.entries[0]
+title = first_entry.title
+article_url = first_entry.link
 
-# Image(s) - High Resolution
-image_urls = []
-promo_image_div = first_article.find("div", class_="promo-image")
-if promo_image_div:
-    imgs = promo_image_div.find_all("img")
-    for img in imgs:
-        srcset = img.get("srcset")
-        if srcset:
-            candidates = []
-            for part in srcset.split(","):
-                url_part, size_part = part.strip().split(" ")
-                width = int(size_part.replace("w", ""))
-                candidates.append((width, url_part))
-            candidates.sort(reverse=True)
-            high_res_url = candidates[0][1]
-            image_urls.append(high_res_url)
-        else:
-            src = img.get("src")
-            if src:
-                image_urls.append(src)
-
-print("High-res Images found:", image_urls)
+print("📰 Latest Article:", title)
+print("🔗 URL:", article_url)
 
 # -----------------------------
-# 4️⃣ Duplicate check (title-based)
+# 4️⃣ Duplicate check
 # -----------------------------
 if title in posted_articles or check_duplicate(title):
-    print("❌ Already posted or duplicate. Skipping.")
+    print("⚠️ Already posted or duplicate. Skipping.")
     exit()
 
 # -----------------------------
-# 5️⃣ Generate content with Gemini
+# 5️⃣ Extract Full Content (newspaper3k)
+# -----------------------------
+try:
+    article = Article(article_url, language="bn")
+    article.download()
+    article.parse()
+    article.nlp()  # optional, summary generate করতে পারেন
+    full_content = article.text
+    main_image = article.top_image
+except Exception as e:
+    print("❌ Full content extraction failed:", e)
+    full_content = title
+    main_image = None
+
+# -----------------------------
+# 6️⃣ Generate content with Gemini
 # -----------------------------
 model = genai.GenerativeModel("gemini-2.5-flash")
 
-# Auto summarization
 summary_prompt = f"""
-নিচের নিউজের মূল বিষয়গুলো নিয়ে 2-3 sentence এর আকর্ষণীয় summary বানাও। 
-Article Title: {title}
-Language: Bengali
-Tone: Friendly, human-like, eye-catching
-Include emojis naturally
+নিচের নিউজ কনটেন্টকে বাংলায় বিস্তারিতভাবে এমনভাবে লিখো,
+যেন এটা ফেসবুক পোস্ট হিসেবে ব্যবহার করা যায়। 
+ভাষা হবে সহজবোধ্য, আকর্ষণীয়, human-like, engaging।
+ইমোজি ব্যবহার করবে, পাঠকের সাথে কথা বলার টোনে লিখবে।
+শেষে পাঠককে মন্তব্য করার মতো ছোট প্রশ্ন যোগ করবে।
+
+নিউজ কনটেন্ট:
+---
+{full_content}
 """
+
 summary_resp = model.generate_content(summary_prompt)
 summary_text = summary_resp.text.strip()
 
@@ -162,22 +103,28 @@ hashtags_text = " ".join(hashtags)
 
 # Final FB post content
 fb_content = f"{highlighted_text}\n\n{hashtags_text}"
-print("Generated FB Content:\n", fb_content)
+print("✅ Generated FB Content:\n", fb_content)
 
 # -----------------------------
-# 6️⃣ Download & prepare images
+# 7️⃣ Prepare Images
 # -----------------------------
 local_images = []
-for i, url in enumerate(image_urls):
-    filename = f"img_{i}.jpg"
-    if download_image(url, filename):
-        local_images.append(filename)
+if main_image:
+    if download_image(main_image, "img_0.jpg"):
+        local_images.append("img_0.jpg")
+
+if "media_content" in first_entry:
+    for i, media in enumerate(first_entry.media_content):
+        img_url = media.get("url")
+        if img_url and download_image(img_url, f"img_{i+1}.jpg"):
+            local_images.append(f"img_{i+1}.jpg")
 
 # -----------------------------
-# 7️⃣ Post to Facebook (Photo Only, No Link)
+# 8️⃣ Post to Facebook
 # -----------------------------
 fb_api_url = f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos"
 fb_result = []
+
 if local_images:
     for idx, img_file in enumerate(local_images):
         data = {"caption": fb_content if idx == 0 else "", "access_token": FB_ACCESS_TOKEN}
@@ -189,27 +136,27 @@ else:
     r = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed", data=post_data)
     fb_result.append(r.json())
 
-print("Facebook Response:", fb_result)
+print("📤 Facebook Response:", fb_result)
 
 # -----------------------------
-# 8️⃣ Auto-comment on first image
+# 9️⃣ Auto-comment
 # -----------------------------
-if local_images and fb_result:
+if fb_result:
     first_post_id = fb_result[0].get("id")
     if first_post_id:
         comment_prompt = f"""
         Article Title: {title}
         Summary: {summary_text}
-        Write a short, friendly, engaging, and scroll-stopping comment in Bengali for this Facebook post.
+        Write a short, friendly, engaging comment in Bengali for this Facebook post.
         Include emojis naturally.
         """
         comment_resp = model.generate_content(comment_prompt)
         comment_text = comment_resp.text.strip()
-        print("Generated Comment:\n", comment_text)
+        print("💬 Generated Comment:\n", comment_text)
         post_fb_comment(first_post_id, comment_text)
 
 # -----------------------------
-# 9️⃣ Log successful post (title)
+# 🔟 Log successful post
 # -----------------------------
 posted_articles.append(title)
 with open(LOG_FILE, "w") as f:
