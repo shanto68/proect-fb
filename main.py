@@ -1,5 +1,6 @@
 import os
 import json
+import requests       # << এইটা নতুন যোগ
 import feedparser
 import google.generativeai as genai
 from utils import check_duplicate, download_image, highlight_keywords, post_fb_comment
