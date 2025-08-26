@@ -3,8 +3,8 @@ import json
 import feedparser
 import requests
 import google.generativeai as genai
-from utils import check_duplicate, download_image, post_fb_comment
 from newspaper import Article
+from utils import check_duplicate, download_image, post_fb_comment, extract_og_image
 
 # -----------------------------
 # 1️⃣ Configuration
@@ -56,23 +56,31 @@ if title in posted_articles or check_duplicate(title):
 # 5️⃣ Extract full content
 # -----------------------------
 try:
-    article = Article(article_url, language=None)  # Stopwords issue fix
+    article = Article(article_url, language="bn")  # Bengali support
     article.download()
     article.parse()
-    full_content = article.text  # Full article
+    full_content = article.text
 except Exception as e:
     print("❌ Full content extraction failed:", e)
     full_content = title
 
 # -----------------------------
-# 6️⃣ Optional: Featured image
+# 6️⃣ Featured image (RSS or og:image fallback)
 # -----------------------------
 featured_image = None
-try:
-    if article.top_image:
-        featured_image = article.top_image
-except:
-    featured_image = None
+if hasattr(first_entry, "media_content"):
+    for media in first_entry.media_content:
+        if media.get("url"):
+            featured_image = media["url"]
+            break
+
+# Fallback to newspaper top_image
+if not featured_image and getattr(article, "top_image", None):
+    featured_image = article.top_image
+
+# Fallback to og:image
+if not featured_image:
+    featured_image = extract_og_image(article_url)
 
 local_image = None
 if featured_image:
@@ -86,7 +94,7 @@ else:
     print("⚠️ No featured image found")
 
 # -----------------------------
-# 7️⃣ Generate hashtags only
+# 7️⃣ Generate hashtags only (Gemini AI)
 # -----------------------------
 model = genai.GenerativeModel("gemini-2.5-flash")
 
@@ -95,8 +103,8 @@ Generate 3-5 relevant Bengali hashtags for this news article.
 Title: {title}
 Full Content: {full_content}
 """
-hashtag_resp = model.generate_content(hashtag_prompt)
-hashtags = [tag.strip() for tag in hashtag_resp.text.split() if tag.startswith("#")]
+hashtag_resp = model.generate_text(hashtag_prompt)
+hashtags = [tag.strip() for tag in hashtag_resp.split() if tag.startswith("#")]
 hashtags_text = " ".join(hashtags)
 
 # -----------------------------
@@ -112,19 +120,16 @@ fb_result = []
 
 if local_image:
     with open(local_image, "rb") as f:
-        data = {
-            "caption": fb_content,
-            "access_token": FB_ACCESS_TOKEN
-        }
+        data = {"caption": fb_content, "access_token": FB_ACCESS_TOKEN}
         files = {"source": f}
         r = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos", data=data, files=files)
         fb_result.append(r.json())
-        print("📤 Facebook Response:", r.json())
 else:
     post_data = {"message": fb_content, "access_token": FB_ACCESS_TOKEN}
     r = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed", data=post_data)
     fb_result.append(r.json())
-    print("📤 Facebook Response:", r.json())
+
+print("📤 Facebook Response:", fb_result)
 
 # -----------------------------
 # 🔟 Log successful post
