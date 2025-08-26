@@ -77,6 +77,8 @@ if hasattr(first_entry, "media_content"):
 if top_image:
     candidate_images.append(top_image)
 
+print("Candidate images found:", candidate_images)
+
 # -----------------------------
 # Auto-detect highest resolution images
 # -----------------------------
@@ -84,17 +86,19 @@ def pick_high_res(images):
     scored = []
     for url in images:
         try:
-            r = requests.head(url, timeout=5)
+            headers = {"User-Agent": "Mozilla/5.0"}
+            r = requests.head(url, timeout=5, headers=headers, verify=False)
             size = int(r.headers.get('Content-Length', 0))
             scored.append((size, url))
         except:
-            continue
+            scored.append((0, url))  # fallback
     if scored:
         scored.sort(reverse=True)
         return [url for size, url in scored]
     return images
 
 high_res_images = pick_high_res(candidate_images)
+print("High-res images selected:", high_res_images)
 
 # -----------------------------
 # Download images locally
@@ -104,8 +108,10 @@ for idx, img_url in enumerate(high_res_images):
     filename = f"img_{idx}.jpg"
     if download_image(img_url, filename):
         local_images.append(filename)
-    if idx >= 4:  # optional: max 5 images
+    if idx >= 4:  # max 5 images
         break
+
+print("Local images downloaded:", local_images)
 
 # -----------------------------
 # 6️⃣ Generate FB Post Content
@@ -149,8 +155,9 @@ fb_result = []
 if local_images:
     for idx, img_file in enumerate(local_images):
         data = {"caption": fb_content if idx == 0 else "", "access_token": FB_ACCESS_TOKEN}
-        files = {"source": open(img_file, "rb")}
-        r = requests.post(fb_api_url, data=data, files=files)
+        with open(img_file, "rb") as f:
+            files = {"source": f}
+            r = requests.post(fb_api_url, data=data, files=files)
         fb_result.append(r.json())
 else:
     post_data = {"message": fb_content, "access_token": FB_ACCESS_TOKEN}
