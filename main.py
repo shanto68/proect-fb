@@ -1,198 +1,201 @@
 import os
-import requests
 import json
-import logging
-from urllib.parse import quote
-from typing import Optional, Dict, Any
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Disable SSL warnings (use with caution)
-requests.packages.urllib3.disable_warnings()
+import feedparser
+import requests
+import google.generativeai as genai
+from newspaper import Article
+from bs4 import BeautifulSoup
+from utils import check_duplicate, download_image, highlight_keywords, post_fb_comment
 
 # -----------------------------
-# Duplicate check via botlink.gt.tc
+# 1️⃣ Configuration
 # -----------------------------
-def check_duplicate(title: str, timeout: int = 10) -> bool:
-    """
-    Check if a title is duplicate using botlink.gt.tc service
-    
-    Args:
-        title: The title to check for duplicates
-        timeout: Request timeout in seconds
-        
-    Returns:
-        bool: True if duplicate, False if unique
-    """
-    encoded_title = quote(title)
-    session = requests.Session()
-    
-    try:
-        # Check URL
-        check_url = f"https://botlink.gt.tc/?urlcheck={encoded_title}"
-        resp = session.get(check_url, timeout=timeout, verify=False)
-        
-        if resp.status_code != 200:
-            logger.warning(f"Duplicate check returned status {resp.status_code}")
-            return False
-            
-        if "duplicate.php" in resp.text:
-            return True
-        elif "unique.php" in resp.text:
-            # Submit as unique
-            submit_url = f"https://botlink.gt.tc/?urlsubmit={encoded_title}"
-            session.get(submit_url, timeout=timeout, verify=False)
-            return False
-        else:
-            logger.warning("Unexpected response from duplicate check service")
-            return False
-            
-    except requests.exceptions.Timeout:
-        logger.error("Duplicate check timed out")
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Duplicate check failed: {e}")
-    except Exception as e:
-        logger.error(f"Unexpected error in duplicate check: {e}")
-    
-    return False
+RSS_FEED = os.environ.get("RSS_FEED_URL")
+FB_PAGE_ID = os.environ.get("FB_PAGE_ID")
+FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
+GEN_API_KEY = os.environ.get("GEMINI_API_KEY")
+LOG_FILE = "posted_articles.json"
+
+if not RSS_FEED:
+    print("❌ RSS_FEED_URL not provided.")
+    exit()
+
+genai.configure(api_key=GEN_API_KEY)
 
 # -----------------------------
-# Download image with headers + fallback
+# 2️⃣ Load posted articles
 # -----------------------------
-def download_image(url: str, filename: str, timeout: int = 30) -> bool:
-    """
-    Download an image from URL and save to file
-    
-    Args:
-        url: Image URL to download
-        filename: Local filename to save the image
-        timeout: Request timeout in seconds
-        
-    Returns:
-        bool: True if download successful, False otherwise
-    """
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    }
-    
-    try:
-        with requests.get(url, stream=True, timeout=timeout, 
-                         headers=headers, verify=False) as r:
-            r.raise_for_status()
-            
-            with open(filename, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-            
-            # Verify file was created and has content
-            if os.path.exists(filename) and os.path.getsize(filename) > 0:
-                logger.info(f"Successfully downloaded image: {filename}")
-                return True
-            else:
-                logger.error("Downloaded file is empty or doesn't exist")
-                return False
-                
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Image download failed for {url}: {e}")
-    except IOError as e:
-        logger.error(f"File write error for {filename}: {e}")
-    except Exception as e:
-        logger.error(f"Unexpected error downloading image: {e}")
-    
-    return False
+try:
+    with open(LOG_FILE, "r") as f:
+        posted_articles = json.load(f)
+except:
+    posted_articles = []
 
 # -----------------------------
-# Highlight keywords in text
+# 3️⃣ Fetch RSS feed
 # -----------------------------
-def highlight_keywords(text: str, keywords: list) -> str:
-    """
-    Highlight keywords in text with emoji markers
-    
-    Args:
-        text: The text to process
-        keywords: List of keywords to highlight
-        
-    Returns:
-        str: Text with highlighted keywords
-    """
-    if not text or not keywords:
-        return text
-    
-    # Case-insensitive highlighting while preserving original case
-    for kw in keywords:
-        if kw and kw.lower() in text.lower():
-            # Find the actual case variant in the text
-            pattern = re.compile(re.escape(kw), re.IGNORECASE)
-            text = pattern.sub(f"⚡{kw}⚡", text)
-    
-    return text
+feed = feedparser.parse(RSS_FEED)
+if not feed.entries:
+    print("❌ No RSS entries found.")
+    exit()
+
+first_entry = feed.entries[0]
+title = first_entry.title
+article_url = first_entry.link
+
+print("📰 Latest Article:", title)
+print("🔗 URL:", article_url)
 
 # -----------------------------
-# Post comment to FB
+# 4️⃣ Duplicate check
 # -----------------------------
-def post_fb_comment(post_id: str, comment_text: str) -> Optional[Dict[str, Any]]:
-    """
-    Post a comment to a Facebook post
-    
-    Args:
-        post_id: Facebook post ID
-        comment_text: Text of the comment to post
-        
-    Returns:
-        Optional[Dict]: Facebook API response or None if failed
-    """
-    FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
-    
-    if not FB_ACCESS_TOKEN:
-        logger.error("Facebook access token not found in environment variables")
-        return None
-    
-    if not comment_text.strip():
-        logger.error("Comment text is empty")
-        return None
-    
-    fb_comment_url = f"https://graph.facebook.com/v17.0/{post_id}/comments"
-    
-    data = {
-        "message": comment_text,
-        "access_token": FB_ACCESS_TOKEN
-    }
-    
-    try:
-        resp = requests.post(fb_comment_url, data=data, timeout=30)
-        resp.raise_for_status()
-        
-        response_data = resp.json()
-        
-        if "error" in response_data:
-            logger.error(f"Facebook API error: {response_data['error']}")
-            return None
-        
-        logger.info("Comment posted successfully")
-        return response_data
-        
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Facebook comment request failed: {e}")
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse Facebook response: {e}")
-    except Exception as e:
-        logger.error(f"Unexpected error posting comment: {e}")
-    
-    return None
+if title in posted_articles or check_duplicate(title):
+    print("⚠️ Already posted or duplicate. Skipping.")
+    exit()
 
-# Example usage
-if __name__ == "__main__":
-    # Test duplicate check
-    duplicate = check_duplicate("Test Title")
-    print(f"Duplicate: {duplicate}")
-    
-    # Test image download
-    # download_image("https://example.com/image.jpg", "test_image.jpg")
-    
-    # Test keyword highlighting
-    text = "This is a test with important keywords"
-    highlighted = highlight_keywords(text, ["test", "important"])
-    print(f"Highlighted: {highlighted}")
+# -----------------------------
+# 5️⃣ Scrape full article content
+# -----------------------------
+try:
+    article = Article(article_url, language="bn")
+    article.download()
+    article.parse()
+    full_content = article.text
+    top_image = article.top_image
+    authors = article.authors
+    publish_date = article.publish_date
+except Exception as e:
+    print("❌ Newspaper parsing failed:", e)
+    full_content = title
+    top_image = None
+    authors = []
+    publish_date = None
+
+# BeautifulSoup for multiple images & tags
+try:
+    resp = requests.get(article_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+    soup = BeautifulSoup(resp.content, "html.parser")
+
+    # Multiple images
+    imgs = soup.find_all("img")
+    candidate_images = [img.get("src") for img in imgs if img.get("src") and img.get("src").startswith("http")]
+    if top_image:
+        candidate_images.insert(0, top_image)
+
+    # Tags / keywords
+    keywords_meta = soup.find("meta", attrs={"name": "keywords"})
+    tags = [t.strip() for t in keywords_meta.get("content", "").split(",")] if keywords_meta else []
+
+except Exception as e:
+    print("❌ BeautifulSoup scraping failed:", e)
+    candidate_images = [top_image] if top_image else []
+    tags = []
+
+# -----------------------------
+# 6️⃣ Pick high-res images
+# -----------------------------
+def pick_high_res(images):
+    scored = []
+    for url in images:
+        try:
+            r = requests.head(url, timeout=5, headers={"User-Agent": "Mozilla/5.0"}, verify=False)
+            size = int(r.headers.get('Content-Length', 0))
+            scored.append((size, url))
+        except:
+            scored.append((0, url))
+    scored.sort(reverse=True)
+    return [url for size, url in scored]
+
+high_res_images = pick_high_res(candidate_images)
+print("High-res images selected:", high_res_images)
+
+# -----------------------------
+# 7️⃣ Download images locally (max 5)
+# -----------------------------
+local_images = []
+for idx, img_url in enumerate(high_res_images):
+    filename = f"img_{idx}.jpg"
+    if download_image(img_url, filename):
+        local_images.append(filename)
+    if idx >= 4:
+        break
+print("Local images downloaded:", local_images)
+
+# -----------------------------
+# 8️⃣ Prepare FB Post Content (full article)
+# -----------------------------
+keywords_for_highlight = title.split()[:3] + tags[:2]
+fb_content = highlight_keywords(full_content, keywords_for_highlight)
+
+# Optional hashtags
+model = genai.GenerativeModel("gemini-2.5-flash")
+hashtag_prompt = f"""
+Generate 3-5 relevant Bengali hashtags for this news article.
+Title: {title}
+Content: {full_content}
+"""
+try:
+    hashtag_resp = model.generate_content(hashtag_prompt)
+    hashtags = [tag.strip() for tag in hashtag_resp.text.split() if tag.startswith("#")]
+except:
+    hashtags = []
+
+hashtags_text = " ".join(hashtags)
+if hashtags_text:
+    fb_content = f"{fb_content}\n\n{hashtags_text}"
+
+# -----------------------------
+# 9️⃣ Post to Facebook
+# -----------------------------
+fb_result = []
+
+if local_images:
+    # First image with short caption (500 char max)
+    first_caption = fb_content[:500]
+    data = {"caption": first_caption, "access_token": FB_ACCESS_TOKEN}
+    with open(local_images[0], "rb") as f:
+        files = {"source": f}
+        r = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos", data=data, files=files)
+    fb_result.append(r.json())
+
+    # Remaining images (album style)
+    for img_file in local_images[1:]:
+        data = {"caption": "", "access_token": FB_ACCESS_TOKEN}
+        with open(img_file, "rb") as f:
+            files = {"source": f}
+            r = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos", data=data, files=files)
+        fb_result.append(r.json())
+else:
+    # No images → normal feed post with full article
+    post_data = {"message": fb_content, "access_token": FB_ACCESS_TOKEN}
+    r = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed", data=post_data)
+    fb_result.append(r.json())
+
+print("📤 Facebook Response:", fb_result)
+
+# -----------------------------
+# 🔟 Auto-comment (full article if needed)
+# -----------------------------
+if fb_result:
+    first_post_id = fb_result[0].get("id")
+    if first_post_id:
+        comment_prompt = f"""
+        Article Title: {title}
+        Write a short, friendly, engaging comment in Bengali for this Facebook post. Include emojis naturally.
+        """
+        try:
+            comment_resp = model.generate_content(comment_prompt)
+            comment_text = comment_resp.text.strip()
+            print("💬 Generated Comment:\n", comment_text)
+            post_fb_comment(first_post_id, comment_text)
+        except:
+            print("⚠️ Comment generation failed")
+
+# -----------------------------
+# 1️⃣1️⃣ Log successful post
+# -----------------------------
+posted_articles.append(title)
+with open(LOG_FILE, "w") as f:
+    json.dump(posted_articles, f)
+
+print("✅ Article posted successfully!")
