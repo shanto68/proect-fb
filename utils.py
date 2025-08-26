@@ -1,13 +1,11 @@
+import os
 import requests
 import json
-import os  # << added
-import urllib3
 
-# Suppress insecure request warnings
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
+# -----------------------------
+# Duplicate check via botlink.gt.tc
+# -----------------------------
 def check_duplicate(title):
-    """Check if article title is duplicate using botlink.gt.tc"""
     from urllib.parse import quote
     encoded_title = quote(title)
     try:
@@ -15,40 +13,51 @@ def check_duplicate(title):
         if "duplicate.php" in resp.text:
             return True
         elif "unique.php" in resp.text:
-            # Submit URL if unique
             requests.get(f"https://botlink.gt.tc/?urlsubmit={encoded_title}", timeout=10, verify=False)
             return False
     except Exception as e:
         print("❌ Duplicate check failed:", e)
-        return False
+    return False
 
+# -----------------------------
+# Download image with headers + fallback
+# -----------------------------
 def download_image(url, filename):
     try:
-        r = requests.get(url, stream=True, timeout=10)
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, stream=True, timeout=10, headers=headers, verify=False)
         if r.status_code == 200:
             with open(filename, 'wb') as f:
                 for chunk in r.iter_content(1024):
                     f.write(chunk)
             return True
+        else:
+            print("❌ Failed to download:", url, r.status_code)
     except Exception as e:
-        print("❌ Image download failed:", e)
+        print("❌ Image download error:", e, url)
     return False
 
+# -----------------------------
+# Highlight keywords in text
+# -----------------------------
 def highlight_keywords(text, keywords):
     for kw in keywords:
         if kw in text:
             text = text.replace(kw, f"⚡{kw}⚡")
     return text
 
+# -----------------------------
+# Post comment to FB
+# -----------------------------
 def post_fb_comment(post_id, comment_text):
-    """Post a comment on a Facebook photo post"""
+    import os
+    import requests
+    FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
     fb_comment_url = f"https://graph.facebook.com/v17.0/{post_id}/comments"
-    data = {"message": comment_text, "access_token": os.environ.get("FB_ACCESS_TOKEN")}
+    data = {"message": comment_text, "access_token": FB_ACCESS_TOKEN}
     try:
         resp = requests.post(fb_comment_url, data=data)
-        result = resp.json()
-        print("Comment Response:", result)
-        return result
+        return resp.json()
     except Exception as e:
         print("❌ Comment failed:", e)
         return None
