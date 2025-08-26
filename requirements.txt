@@ -4,3 +4,4 @@ google-generativeai
 python-dotenv
 feedparser
 newspaper3k
+lxml[html_clean]
