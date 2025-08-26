@@ -3,7 +3,7 @@ import json
 import feedparser
 import requests
 import google.generativeai as genai
-from utils import check_duplicate, download_image, highlight_keywords, post_fb_comment
+from utils import check_duplicate, download_image, post_fb_comment
 from newspaper import Article
 from bs4 import BeautifulSoup
 
@@ -70,18 +70,18 @@ except Exception as e:
 # -----------------------------
 candidate_images = []
 
-# 1️⃣ RSS media content
+# RSS media content
 if hasattr(first_entry, "media_content"):
     for media in first_entry.media_content:
         img_url = media.get("url")
         if img_url:
             candidate_images.append(img_url)
 
-# 2️⃣ Newspaper top image
+# Newspaper top image
 if hasattr(article, "top_image") and article.top_image:
     candidate_images.append(article.top_image)
 
-# 3️⃣ All <img> tags from HTML
+# All <img> tags from HTML
 try:
     html = requests.get(article_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10).text
     soup = BeautifulSoup(html, "html.parser")
@@ -96,9 +96,7 @@ except Exception as e:
 candidate_images = list(dict.fromkeys(candidate_images))
 print("Candidate images found:", candidate_images)
 
-# -----------------------------
 # Pick first valid image
-# -----------------------------
 featured_image = None
 for img_url in candidate_images:
     try:
@@ -112,9 +110,7 @@ for img_url in candidate_images:
 
 print("Featured image selected:", featured_image)
 
-# -----------------------------
 # Download featured image
-# -----------------------------
 local_image = None
 if featured_image:
     filename = "featured.jpg"
@@ -127,36 +123,23 @@ else:
     print("⚠️ No valid image found")
 
 # -----------------------------
-# 7️⃣ Generate FB Post Content
+# 7️⃣ Generate Hashtags only
 # -----------------------------
 model = genai.GenerativeModel("gemini-2.5-flash")
 
-# --- Summary ---
-summary_prompt = f"""
-নিচের নিউজ কনটেন্টকে বাংলায় ৩-৪ লাইনের আকর্ষণীয়, 
-human-like ফেসবুক পোস্ট স্টাইলে সাজাও। ইমোজি ব্যবহার করবে।
-নিউজ কনটেন্ট:
----
-{full_content}
-"""
-summary_resp = model.generate_content(summary_prompt)
-summary_text = summary_resp.text.strip()
-
-# Highlight keywords
-keywords = title.split()[:3]
-highlighted_text = highlight_keywords(summary_text, keywords)
-
-# --- Hashtags ---
 hashtag_prompt = f"""
 Generate 3-5 relevant Bengali hashtags for this news article.
 Title: {title}
-Summary: {summary_text}
+Content: {full_content}
 """
 hashtag_resp = model.generate_content(hashtag_prompt)
 hashtags = [tag.strip() for tag in hashtag_resp.text.split() if tag.startswith("#")]
 hashtags_text = " ".join(hashtags)
 
-fb_content = f"{highlighted_text}\n\n{hashtags_text}"
+# -----------------------------
+# FB post content (full text + source link + hashtags)
+# -----------------------------
+fb_content = f"📰 {title}\n\n{full_content}\n\nSource: {article_url}\n\n{hashtags_text}"
 print("✅ Generated FB Content:\n", fb_content)
 
 # -----------------------------
@@ -188,7 +171,6 @@ if fb_result:
     if first_post_id:
         comment_prompt = f"""
         Article Title: {title}
-        Summary: {summary_text}
         Write a short, friendly, engaging comment in Bengali for this Facebook post.
         Include emojis naturally.
         """
