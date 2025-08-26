@@ -3,7 +3,6 @@ import json
 import feedparser
 import requests
 import google.generativeai as genai
-from newspaper import Article
 from bs4 import BeautifulSoup
 from utils import check_duplicate, download_image, highlight_keywords, post_fb_comment
 
@@ -41,10 +40,17 @@ if not feed.entries:
 
 first_entry = feed.entries[0]
 title = first_entry.title
-article_url = first_entry.link
+
+# Google News RSS gives redirect link → extract original URL
+link = first_entry.link
+try:
+    resp = requests.get(link, timeout=10, headers={"User-Agent":"Mozilla/5.0"}, allow_redirects=True)
+    original_url = resp.url
+except:
+    original_url = link
 
 print("📰 Latest Article:", title)
-print("🔗 URL:", article_url)
+print("🔗 Original URL:", original_url)
 
 # -----------------------------
 # 4️⃣ Duplicate check
@@ -54,52 +60,40 @@ if title in posted_articles or check_duplicate(title):
     exit()
 
 # -----------------------------
-# 5️⃣ Scrape full article content
+# 5️⃣ Scrape full article + images
 # -----------------------------
-try:
-    article = Article(article_url, language="bn")
-    article.download()
-    article.parse()
-    full_content = article.text
-    top_image = article.top_image
-    authors = article.authors
-    publish_date = article.publish_date
-except Exception as e:
-    print("❌ Newspaper parsing failed:", e)
-    full_content = title
-    top_image = None
-    authors = []
-    publish_date = None
+full_content = title
+candidate_images = []
+tags = []
 
-# BeautifulSoup for multiple images & tags
 try:
-    resp = requests.get(article_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+    resp = requests.get(original_url, headers={"User-Agent":"Mozilla/5.0"}, timeout=10)
     soup = BeautifulSoup(resp.content, "html.parser")
 
-    # Multiple images
+    # Full text
+    paragraphs = soup.find_all("p")
+    full_content = "\n".join(p.get_text().strip() for p in paragraphs if p.get_text().strip())
+
+    # Images
     imgs = soup.find_all("img")
     candidate_images = [img.get("src") for img in imgs if img.get("src") and img.get("src").startswith("http")]
-    if top_image:
-        candidate_images.insert(0, top_image)
 
-    # Tags / keywords
-    keywords_meta = soup.find("meta", attrs={"name": "keywords"})
+    # Optional tags/keywords
+    keywords_meta = soup.find("meta", attrs={"name":"keywords"})
     tags = [t.strip() for t in keywords_meta.get("content", "").split(",")] if keywords_meta else []
 
 except Exception as e:
-    print("❌ BeautifulSoup scraping failed:", e)
-    candidate_images = [top_image] if top_image else []
-    tags = []
+    print("❌ Scraping failed:", e)
 
 # -----------------------------
-# 6️⃣ Pick high-res images
+# 6️⃣ High-res images
 # -----------------------------
 def pick_high_res(images):
     scored = []
     for url in images:
         try:
-            r = requests.head(url, timeout=5, headers={"User-Agent": "Mozilla/5.0"}, verify=False)
-            size = int(r.headers.get('Content-Length', 0))
+            r = requests.head(url, timeout=5, headers={"User-Agent":"Mozilla/5.0"}, verify=False)
+            size = int(r.headers.get("Content-Length", 0))
             scored.append((size, url))
         except:
             scored.append((0, url))
@@ -110,24 +104,22 @@ high_res_images = pick_high_res(candidate_images)
 print("High-res images selected:", high_res_images)
 
 # -----------------------------
-# 7️⃣ Download images locally (max 5)
+# 7️⃣ Download images locally
 # -----------------------------
 local_images = []
-for idx, img_url in enumerate(high_res_images):
+for idx, img_url in enumerate(high_res_images[:5]):  # max 5 images
     filename = f"img_{idx}.jpg"
     if download_image(img_url, filename):
         local_images.append(filename)
-    if idx >= 4:
-        break
 print("Local images downloaded:", local_images)
 
 # -----------------------------
-# 8️⃣ Prepare FB Post Content (full article)
+# 8️⃣ Prepare FB post content
 # -----------------------------
 keywords_for_highlight = title.split()[:3] + tags[:2]
 fb_content = highlight_keywords(full_content, keywords_for_highlight)
 
-# Optional hashtags
+# Hashtags via Gemini AI
 model = genai.GenerativeModel("gemini-2.5-flash")
 hashtag_prompt = f"""
 Generate 3-5 relevant Bengali hashtags for this news article.
@@ -140,9 +132,8 @@ try:
 except:
     hashtags = []
 
-hashtags_text = " ".join(hashtags)
-if hashtags_text:
-    fb_content = f"{fb_content}\n\n{hashtags_text}"
+if hashtags:
+    fb_content = f"{fb_content}\n\n{' '.join(hashtags)}"
 
 # -----------------------------
 # 9️⃣ Post to Facebook
@@ -150,7 +141,7 @@ if hashtags_text:
 fb_result = []
 
 if local_images:
-    # First image with short caption (500 char max)
+    # First image with short caption
     first_caption = fb_content[:500]
     data = {"caption": first_caption, "access_token": FB_ACCESS_TOKEN}
     with open(local_images[0], "rb") as f:
@@ -158,7 +149,7 @@ if local_images:
         r = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos", data=data, files=files)
     fb_result.append(r.json())
 
-    # Remaining images (album style)
+    # Remaining images album style
     for img_file in local_images[1:]:
         data = {"caption": "", "access_token": FB_ACCESS_TOKEN}
         with open(img_file, "rb") as f:
@@ -166,7 +157,7 @@ if local_images:
             r = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos", data=data, files=files)
         fb_result.append(r.json())
 else:
-    # No images → normal feed post with full article
+    # No images → normal post
     post_data = {"message": fb_content, "access_token": FB_ACCESS_TOKEN}
     r = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed", data=post_data)
     fb_result.append(r.json())
@@ -174,7 +165,7 @@ else:
 print("📤 Facebook Response:", fb_result)
 
 # -----------------------------
-# 🔟 Auto-comment (full article if needed)
+# 🔟 Auto-comment
 # -----------------------------
 if fb_result:
     first_post_id = fb_result[0].get("id")
