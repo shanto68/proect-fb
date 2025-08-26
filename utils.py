@@ -1,19 +1,19 @@
-import os
 import requests
-import json
+from urllib.parse import quote
 
 # -----------------------------
-# Duplicate check via botlink.gt.tc
+# Duplicate check via botlink.gt.tc (HTTP only)
 # -----------------------------
 def check_duplicate(title):
-    from urllib.parse import quote
     encoded_title = quote(title)
     try:
-        resp = requests.get(f"https://botlink.gt.tc/?urlcheck={encoded_title}", timeout=10, verify=False)
+        url_check = f"http://botlink.gt.tc/?urlcheck={encoded_title}"
+        resp = requests.get(url_check, timeout=10)
         if "duplicate.php" in resp.text:
             return True
         elif "unique.php" in resp.text:
-            requests.get(f"https://botlink.gt.tc/?urlsubmit={encoded_title}", timeout=10, verify=False)
+            submit_url = f"http://botlink.gt.tc/?urlsubmit={encoded_title}"
+            requests.get(submit_url, timeout=10)
             return False
     except Exception as e:
         print("❌ Duplicate check failed:", e)
@@ -25,7 +25,7 @@ def check_duplicate(title):
 def download_image(url, filename):
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
-        r = requests.get(url, stream=True, timeout=10, headers=headers, verify=False)
+        r = requests.get(url, stream=True, timeout=10)
         if r.status_code == 200:
             with open(filename, 'wb') as f:
                 for chunk in r.iter_content(1024):
@@ -38,20 +38,10 @@ def download_image(url, filename):
     return False
 
 # -----------------------------
-# Highlight keywords in text
-# -----------------------------
-def highlight_keywords(text, keywords):
-    for kw in keywords:
-        if kw in text:
-            text = text.replace(kw, f"⚡{kw}⚡")
-    return text
-
-# -----------------------------
 # Post comment to FB
 # -----------------------------
 def post_fb_comment(post_id, comment_text):
     import os
-    import requests
     FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
     fb_comment_url = f"https://graph.facebook.com/v17.0/{post_id}/comments"
     data = {"message": comment_text, "access_token": FB_ACCESS_TOKEN}
