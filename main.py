@@ -1,7 +1,7 @@
 import os
 import json
-import requests       # << এইটা নতুন যোগ
 import feedparser
+import requests
 import google.generativeai as genai
 from utils import check_duplicate, download_image, highlight_keywords, post_fb_comment
 from newspaper import Article
@@ -53,31 +53,68 @@ if title in posted_articles or check_duplicate(title):
     exit()
 
 # -----------------------------
-# 5️⃣ Extract Full Content (newspaper3k)
+# 5️⃣ Extract Full Content & Images
 # -----------------------------
 try:
     article = Article(article_url, language="bn")
     article.download()
     article.parse()
-    # article.nlp()  # NLP skip to avoid stopwords_bn.txt error
     full_content = article.text
-    main_image = article.top_image
+    top_image = article.top_image
 except Exception as e:
     print("❌ Full content extraction failed:", e)
     full_content = title
-    main_image = None
+    top_image = None
+
+# Collect candidate images
+candidate_images = []
+if hasattr(first_entry, "media_content"):
+    for media in first_entry.media_content:
+        img_url = media.get("url")
+        if img_url:
+            candidate_images.append(img_url)
+
+if top_image:
+    candidate_images.append(top_image)
 
 # -----------------------------
-# 6️⃣ Generate content with Gemini
+# Auto-detect highest resolution images
+# -----------------------------
+def pick_high_res(images):
+    scored = []
+    for url in images:
+        try:
+            r = requests.head(url, timeout=5)
+            size = int(r.headers.get('Content-Length', 0))
+            scored.append((size, url))
+        except:
+            continue
+    if scored:
+        scored.sort(reverse=True)
+        return [url for size, url in scored]
+    return images
+
+high_res_images = pick_high_res(candidate_images)
+
+# -----------------------------
+# Download images locally
+# -----------------------------
+local_images = []
+for idx, img_url in enumerate(high_res_images):
+    filename = f"img_{idx}.jpg"
+    if download_image(img_url, filename):
+        local_images.append(filename)
+    if idx >= 4:  # optional: max 5 images
+        break
+
+# -----------------------------
+# 6️⃣ Generate FB Post Content
 # -----------------------------
 model = genai.GenerativeModel("gemini-2.5-flash")
 
 summary_prompt = f"""
-নিচের নিউজ কনটেন্টকে বাংলায় এমনভাবে সাজাও,
-যেন এটা ফেসবুক পোস্ট হিসেবে ব্যবহার করা যায়। 
-ভাষা হবে সহজবোধ্য, আকর্ষণীয়, human-like, engaging।
-ইমোজি ব্যবহার করবে। শেষে পাঠককে মন্তব্য করার মতো ছোট প্রশ্নও যোগ করবে।
-
+নিচের নিউজ কনটেন্টকে বাংলায় ৩-৪ লাইনের আকর্ষণীয়, 
+human-like ফেসবুক পোস্ট স্টাইলে সাজাও। ইমোজি ব্যবহার করবে।
 নিউজ কনটেন্ট:
 ---
 {full_content}
@@ -86,11 +123,11 @@ summary_prompt = f"""
 summary_resp = model.generate_content(summary_prompt)
 summary_text = summary_resp.text.strip()
 
-# Keyword highlighting
+# Highlight keywords
 keywords = title.split()[:3]
 highlighted_text = highlight_keywords(summary_text, keywords)
 
-# Hashtags
+# Generate hashtags
 hashtag_prompt = f"""
 Generate 3-5 relevant Bengali hashtags for this news article.
 Title: {title}
@@ -100,26 +137,11 @@ hashtag_resp = model.generate_content(hashtag_prompt)
 hashtags = [tag.strip() for tag in hashtag_resp.text.split() if tag.startswith("#")]
 hashtags_text = " ".join(hashtags)
 
-# Final FB post content
 fb_content = f"{highlighted_text}\n\n{hashtags_text}"
 print("✅ Generated FB Content:\n", fb_content)
 
 # -----------------------------
-# 7️⃣ Prepare Images
-# -----------------------------
-local_images = []
-if main_image:
-    if download_image(main_image, "img_0.jpg"):
-        local_images.append("img_0.jpg")
-
-if "media_content" in first_entry:
-    for i, media in enumerate(first_entry.media_content):
-        img_url = media.get("url")
-        if img_url and download_image(img_url, f"img_{i+1}.jpg"):
-            local_images.append(f"img_{i+1}.jpg")
-
-# -----------------------------
-# 8️⃣ Post to Facebook
+# 7️⃣ Post to Facebook
 # -----------------------------
 fb_api_url = f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos"
 fb_result = []
@@ -138,7 +160,7 @@ else:
 print("📤 Facebook Response:", fb_result)
 
 # -----------------------------
-# 9️⃣ Auto-comment
+# 8️⃣ Auto-comment
 # -----------------------------
 if fb_result:
     first_post_id = fb_result[0].get("id")
@@ -155,7 +177,7 @@ if fb_result:
         post_fb_comment(first_post_id, comment_text)
 
 # -----------------------------
-# 🔟 Log successful post
+# 9️⃣ Log successful post
 # -----------------------------
 posted_articles.append(title)
 with open(LOG_FILE, "w") as f:
