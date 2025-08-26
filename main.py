@@ -72,7 +72,7 @@ summary_prompt = f"""
 সহজবোধ্য, ফেসবুক পোস্ট স্টাইলে সাজাও। ইমোজি ব্যবহার করবে।
 News Content: {content}
 """
-summary_resp = model.generate_text(summary_prompt)
+summary_resp = model.generate_content(summary_prompt)
 summary_text = summary_resp.text.strip()
 
 # -----------------------------
