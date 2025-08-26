@@ -5,7 +5,6 @@ import requests
 import google.generativeai as genai
 from utils import check_duplicate, download_image, post_fb_comment
 from newspaper import Article
-from bs4 import BeautifulSoup
 
 # -----------------------------
 # 1️⃣ Configuration
@@ -60,7 +59,7 @@ try:
     article = Article(article_url, language="bn")
     article.download()
     article.parse()
-    full_content = article.text
+    full_content = article.text  # পুরো article content
 except Exception as e:
     print("❌ Full content extraction failed:", e)
     full_content = title
