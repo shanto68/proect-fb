@@ -73,7 +73,6 @@ if hasattr(first_entry, "media_content"):
         img_url = media.get("url")
         if img_url:
             candidate_images.append(img_url)
-
 if top_image:
     candidate_images.append(top_image)
 
@@ -110,7 +109,6 @@ for idx, img_url in enumerate(high_res_images):
         local_images.append(filename)
     if idx >= 4:  # max 5 images
         break
-
 print("Local images downloaded:", local_images)
 
 # -----------------------------
@@ -118,6 +116,7 @@ print("Local images downloaded:", local_images)
 # -----------------------------
 model = genai.GenerativeModel("gemini-2.5-flash")
 
+# --- Summary ---
 summary_prompt = f"""
 নিচের নিউজ কনটেন্টকে বাংলায় ৩-৪ লাইনের আকর্ষণীয়, 
 human-like ফেসবুক পোস্ট স্টাইলে সাজাও। ইমোজি ব্যবহার করবে।
@@ -133,7 +132,7 @@ summary_text = summary_resp.text.strip()
 keywords = title.split()[:3]
 highlighted_text = highlight_keywords(summary_text, keywords)
 
-# Generate hashtags
+# --- Hashtags ---
 hashtag_prompt = f"""
 Generate 3-5 relevant Bengali hashtags for this news article.
 Title: {title}
@@ -154,11 +153,24 @@ fb_result = []
 
 if local_images:
     for idx, img_file in enumerate(local_images):
-        data = {"caption": fb_content if idx == 0 else "", "access_token": FB_ACCESS_TOKEN}
         with open(img_file, "rb") as f:
+            data = {
+                "access_token": FB_ACCESS_TOKEN,
+                "published": "true" if idx == 0 else "false",
+                "caption": fb_content if idx == 0 else ""
+            }
             files = {"source": f}
             r = requests.post(fb_api_url, data=data, files=files)
-        fb_result.append(r.json())
+            fb_result.append(r.json())
+
+    # Publish remaining images as album
+    if len(local_images) > 1:
+        batch_ids = [res.get("id") for res in fb_result if res.get("id")]
+        for photo_id in batch_ids[1:]:
+            requests.post(
+                f"https://graph.facebook.com/v17.0/{photo_id}",
+                data={"published": "true", "access_token": FB_ACCESS_TOKEN}
+            )
 else:
     post_data = {"message": fb_content, "access_token": FB_ACCESS_TOKEN}
     r = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed", data=post_data)
