@@ -2,27 +2,43 @@ import os
 import json
 import feedparser
 import requests
-import google.generativeai as genai
-from utils import check_duplicate, download_image, highlight_keywords, post_fb_comment
+from bs4 import BeautifulSoup
 from newspaper import Article
+from utils import check_duplicate, download_image, highlight_keywords, post_fb_comment
+import google.generativeai as genai
 
-# -----------------------------
-# 1️⃣ Configuration
-# -----------------------------
 RSS_FEED = os.environ.get("RSS_FEED_URL")
 FB_PAGE_ID = os.environ.get("FB_PAGE_ID")
 FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 GEN_API_KEY = os.environ.get("GEMINI_API_KEY")
 LOG_FILE = "posted_articles.json"
 
-if not RSS_FEED:
-    print("❌ RSS_FEED_URL not provided.")
-    exit()
+DEFAULT_IMAGE = "https://i.ibb.co/7JfqXxB/default-news.jpg"   # fallback logo/image
 
 genai.configure(api_key=GEN_API_KEY)
 
+
+def extract_images_with_bs4(url):
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, timeout=10, headers=headers, verify=False)
+        soup = BeautifulSoup(r.text, "html.parser")
+        imgs = []
+        for img in soup.find_all("img"):
+            src = img.get("src") or img.get("data-src")
+            if src:
+                if src.startswith("//"):
+                    src = "https:" + src
+                if src.startswith("http"):
+                    imgs.append(src)
+        return list(set(imgs))
+    except Exception as e:
+        print("❌ Image scrape failed:", e)
+        return []
+
+
 # -----------------------------
-# 2️⃣ Load posted articles
+# Load posted log
 # -----------------------------
 try:
     with open(LOG_FILE, "r") as f:
@@ -30,161 +46,104 @@ try:
 except:
     posted_articles = []
 
-# -----------------------------
-# 3️⃣ Fetch RSS feed
-# -----------------------------
 feed = feedparser.parse(RSS_FEED)
 if not feed.entries:
     print("❌ No RSS entries found.")
     exit()
 
-first_entry = feed.entries[0]
-title = first_entry.title
-article_url = first_entry.link
+entry = feed.entries[0]
+title = entry.title
+article_url = entry.link
 
 print("📰 Latest Article:", title)
-print("🔗 URL:", article_url)
 
-# -----------------------------
-# 4️⃣ Duplicate check
-# -----------------------------
+# Duplicate check
 if title in posted_articles or check_duplicate(title):
-    print("⚠️ Already posted or duplicate. Skipping.")
+    print("⚠️ Already posted. Skipping.")
     exit()
 
 # -----------------------------
-# 5️⃣ Extract Full Content & Images
+# Extract content + images
 # -----------------------------
+full_content = title
+candidate_images = []
+
 try:
     article = Article(article_url, language="bn")
     article.download()
     article.parse()
-    full_content = article.text
-    top_image = article.top_image
-    all_images = list(article.images)
+    full_content = article.text.strip() or title
+    if article.top_image:
+        candidate_images.append(article.top_image)
+    if article.images:
+        candidate_images.extend(list(article.images))
 except Exception as e:
-    print("❌ Full content extraction failed:", e)
-    full_content = title
-    top_image = None
-    all_images = []
+    print("⚠️ Newspaper3k failed:", e)
 
-# Collect candidate images
-candidate_images = []
+# fallback bs4
+if not candidate_images:
+    candidate_images = extract_images_with_bs4(article_url)
 
-# RSS থেকে image থাকলে
-if hasattr(first_entry, "media_content"):
-    for media in first_entry.media_content:
+# fallback rss media
+if not candidate_images and hasattr(entry, "media_content"):
+    for media in entry.media_content:
         img_url = media.get("url")
         if img_url:
             candidate_images.append(img_url)
 
-# Article থেকে images add
-if top_image:
-    candidate_images.append(top_image)
-if all_images:
-    candidate_images.extend(all_images)
+# final fallback default image
+if not candidate_images:
+    candidate_images = [DEFAULT_IMAGE]
 
-# Remove duplicates
-candidate_images = list(set(candidate_images))
-print("Candidate images found:", candidate_images)
-
+print("Candidate images:", candidate_images)
 
 # -----------------------------
-# Auto-detect highest resolution images
-# -----------------------------
-def pick_high_res(images):
-    scored = []
-    for url in images:
-        try:
-            headers = {"User-Agent": "Mozilla/5.0"}
-            r = requests.head(url, timeout=5, headers=headers, verify=False)
-            size = int(r.headers.get("Content-Length", 0))
-            scored.append((size, url))
-        except:
-            scored.append((0, url))  # fallback
-    if scored:
-        scored.sort(reverse=True)
-        return [url for size, url in scored]
-    return images
-
-
-high_res_images = pick_high_res(candidate_images)
-print("High-res images selected:", high_res_images)
-
-
-# -----------------------------
-# Download images locally
+# Download first few images
 # -----------------------------
 local_images = []
-for idx, img_url in enumerate(high_res_images):
-    filename = f"img_{idx}"  # ext পরে detect হবে
-    saved_file = download_image(img_url, filename)
-    if saved_file:
-        local_images.append(saved_file)
-    if idx >= 4:  # max 5 images
-        break
+for idx, img in enumerate(candidate_images[:3]):  # max 3 img
+    saved = download_image(img, f"article_{idx}")
+    if saved:
+        local_images.append(saved)
 
-print("Local images downloaded:", local_images)
+# Ensure at least default
+if not local_images:
+    saved = download_image(DEFAULT_IMAGE, "default_img")
+    if saved:
+        local_images.append(saved)
 
+print("✅ Local images ready:", local_images)
 
 # -----------------------------
-# 6️⃣ Generate FB Post Content
+# FB Content (with Gemini hashtags)
 # -----------------------------
-# এখানে তুমি চাইছিলে FULL article পোস্ট হোক
-fb_content = full_content.strip()
-
-# Add hashtags (optional, AI দিয়ে)
 model = genai.GenerativeModel("gemini-2.5-flash")
-hashtag_prompt = f"Generate 3-5 relevant Bengali hashtags for this news article.\nTitle: {title}\nContent: {full_content}"
-hashtag_resp = model.generate_content(hashtag_prompt)
-hashtags = [tag.strip() for tag in hashtag_resp.text.split() if tag.startswith("#")]
-if hashtags:
-    fb_content = f"{fb_content}\n\n{' '.join(hashtags)}"
+prompt = f"Generate 3-5 Bengali hashtags for this article.\nTitle: {title}\nContent: {full_content}"
+hashtags = []
+try:
+    resp = model.generate_content(prompt)
+    hashtags = [t for t in resp.text.split() if t.startswith("#")]
+except:
+    pass
 
-print("✅ Final FB Content Prepared")
-
+fb_content = f"{full_content}\n\n{' '.join(hashtags)}" if hashtags else full_content
 
 # -----------------------------
-# 7️⃣ Post to Facebook
+# Post to FB
 # -----------------------------
 fb_api_url = f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos"
-fb_result = []
+results = []
+for idx, img_file in enumerate(local_images):
+    data = {"caption": fb_content if idx == 0 else "", "access_token": FB_ACCESS_TOKEN}
+    with open(img_file, "rb") as f:
+        files = {"source": f}
+        r = requests.post(fb_api_url, data=data, files=files)
+    results.append(r.json())
 
-if local_images:
-    for idx, img_file in enumerate(local_images):
-        data = {"caption": fb_content if idx == 0 else "", "access_token": FB_ACCESS_TOKEN}
-        with open(img_file, "rb") as f:
-            files = {"source": f}
-            r = requests.post(fb_api_url, data=data, files=files)
-        fb_result.append(r.json())
-else:
-    post_data = {"message": fb_content, "access_token": FB_ACCESS_TOKEN}
-    r = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed", data=post_data)
-    fb_result.append(r.json())
-
-print("📤 Facebook Response:", fb_result)
-
+print("📤 FB Response:", results)
 
 # -----------------------------
-# 8️⃣ Auto-comment
-# -----------------------------
-if fb_result:
-    first_post_id = fb_result[0].get("id")
-    if first_post_id:
-        comment_prompt = f"""
-        Article Title: {title}
-        Content: {full_content[:500]}...
-        Write a short, friendly, engaging comment in Bengali for this Facebook post.
-        Include emojis naturally.
-        """
-        comment_resp = model.generate_content(comment_prompt)
-        comment_text = comment_resp.text.strip()
-        print("💬 Generated Comment:\n", comment_text)
-        post_fb_comment(first_post_id, comment_text)
-
-
-# -----------------------------
-# 9️⃣ Log successful post
+# Log success
 # -----------------------------
 posted_articles.append(title)
 with open(LOG_FILE, "w") as f:
