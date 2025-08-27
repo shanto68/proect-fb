@@ -3,7 +3,7 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import google.generativeai as genai
-from utils import check_duplicate, download_image, highlight_keywords, post_fb_comment
+from utils import download_image, highlight_keywords, post_fb_comment
 import json
 
 # -----------------------------
@@ -68,10 +68,10 @@ print("📌 Source:", source)
 print("⏰ Time:", time_text)
 
 # -----------------------------
-# 5️⃣ Duplicate check (link-based)
+# 5️⃣ Duplicate check (link-based only)
 # -----------------------------
-if link in posted_articles or check_duplicate(title):
-    print("⚠️ Already posted or duplicate. Skipping.")
+if link in posted_articles:
+    print("⚠️ Already posted. Skipping.")
     exit()
 
 # -----------------------------
@@ -119,7 +119,7 @@ model = genai.GenerativeModel("gemini-2.5-flash")
 
 summary_prompt = f"""
 নিচের নিউজ কনটেন্টকে বাংলায় ৩-৪ লাইনের আকর্ষণীয়, 
-human-like ফেসবুক পোস্ট স্টাইলে সাজাও। ইমোজি ব্যবহার করবে।
+human-like ফেসবুক পোস্ট স্টাইলে সাজাও। ইমোজি ব্যবহার করবে। 
 নিউজ কনটেন্ট:
 ---
 {title}
