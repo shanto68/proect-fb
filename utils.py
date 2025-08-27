@@ -1,22 +1,28 @@
 import os
 import requests
 import json
+import time
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # -----------------------------
-# Duplicate check via botlink.gt.tc
+# Duplicate check via botlink.gt.tc with retry
 # -----------------------------
 def check_duplicate(title):
     from urllib.parse import quote
     encoded_title = quote(title)
-    try:
-        resp = requests.get(f"https://botlink.gt.tc/?urlcheck={encoded_title}", timeout=10, verify=False)
-        if "duplicate.php" in resp.text:
-            return True
-        elif "unique.php" in resp.text:
-            requests.get(f"https://botlink.gt.tc/?urlsubmit={encoded_title}", timeout=10, verify=False)
-            return False
-    except Exception as e:
-        print("❌ Duplicate check failed:", e)
+    for _ in range(3):  # 3 attempts
+        try:
+            resp = requests.get(f"https://botlink.gt.tc/?urlcheck={encoded_title}", timeout=10, verify=False)
+            if "duplicate.php" in resp.text:
+                return True
+            elif "unique.php" in resp.text:
+                requests.get(f"https://botlink.gt.tc/?urlsubmit={encoded_title}", timeout=10, verify=False)
+                return False
+        except:
+            time.sleep(2)
+    print("❌ Duplicate check failed after 3 attempts")
     return False
 
 # -----------------------------
