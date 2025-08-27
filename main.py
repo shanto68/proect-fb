@@ -5,9 +5,12 @@ from bs4 import BeautifulSoup
 from newspaper import Article
 import google.generativeai as genai
 from utils import check_duplicate, download_image, highlight_keywords, post_fb_comment
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # -----------------------------
-# 1️⃣ Configuration
+# Configuration
 # -----------------------------
 NEWS_URL = "https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx1YlY4U0FtSnVHZ0pDUkNnQVAB?hl=bn&gl=BD&ceid=BD%3Abn"
 FB_PAGE_ID = os.environ.get("FB_PAGE_ID")
@@ -22,7 +25,7 @@ if not GEN_API_KEY:
 genai.configure(api_key=GEN_API_KEY)
 
 # -----------------------------
-# 2️⃣ Load posted articles
+# Load posted articles
 # -----------------------------
 try:
     with open(LOG_FILE, "r") as f:
@@ -31,7 +34,7 @@ except:
     posted_articles = []
 
 # -----------------------------
-# 3️⃣ Scrape Google News Page
+# Scrape Google News Page
 # -----------------------------
 headers = {"User-Agent": "Mozilla/5.0"}
 r = requests.get(NEWS_URL, headers=headers)
@@ -43,7 +46,7 @@ article_title = None
 for a in soup.select("a.WwrzSb"):
     title = a.get_text()
     link = "https://news.google.com" + a['href'][1:]
-    if title not in posted_articles and not check_duplicate(title):
+    if title and title not in posted_articles and not check_duplicate(title):
         article_title = title
         article_link = link
         break
@@ -56,10 +59,10 @@ print("📰 Latest Article:", article_title)
 print("🔗 URL:", article_link)
 
 # -----------------------------
-# 4️⃣ Extract Full Content & Images
+# Extract Full Content & Images
 # -----------------------------
 try:
-    article = Article(article_link, language="bn")
+    article = Article(article_link, language="bn", fetch_images=True)
     article.download()
     article.parse()
     full_content = article.text
@@ -74,7 +77,7 @@ if top_image:
     candidate_images.append(top_image)
 
 # -----------------------------
-# Auto-detect highest resolution images
+# Pick highest resolution images
 # -----------------------------
 def pick_high_res(images):
     scored = []
@@ -104,7 +107,7 @@ for idx, img_url in enumerate(high_res_images):
         break
 
 # -----------------------------
-# 5️⃣ Generate FB Post Content
+# Generate FB Post Content with Gemini AI
 # -----------------------------
 model = genai.GenerativeModel("gemini-2.5-flash")
 
@@ -116,7 +119,7 @@ human-like ফেসবুক পোস্ট স্টাইলে সাজা
 {full_content}
 """
 
-summary_resp = model.generate_text(summary_prompt)
+summary_resp = model.generate_content(summary_prompt)
 summary_text = summary_resp.text.strip()
 
 keywords = article_title.split()[:3]
@@ -127,14 +130,14 @@ Generate 3-5 relevant Bengali hashtags for this news article.
 Title: {article_title}
 Summary: {summary_text}
 """
-hashtag_resp = model.generate_text(hashtag_prompt)
+hashtag_resp = model.generate_content(hashtag_prompt)
 hashtags = [tag.strip() for tag in hashtag_resp.text.split() if tag.startswith("#")]
 hashtags_text = " ".join(hashtags)
 
 fb_content = f"{highlighted_text}\n\n{hashtags_text}"
 
 # -----------------------------
-# 6️⃣ Post to Facebook
+# Post to Facebook
 # -----------------------------
 fb_api_url = f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos"
 fb_result = []
@@ -142,7 +145,7 @@ fb_result = []
 if local_images:
     for idx, img_file in enumerate(local_images):
         data = {"caption": fb_content if idx == 0 else "", "access_token": FB_ACCESS_TOKEN}
-        with open(img_file, "rb") as f:
+        with open(img_file, 'rb') as f:
             files = {"source": f}
             r = requests.post(fb_api_url, data=data, files=files)
         fb_result.append(r.json())
@@ -152,7 +155,7 @@ else:
     fb_result.append(r.json())
 
 # -----------------------------
-# 7️⃣ Auto-comment
+# Auto-comment
 # -----------------------------
 if fb_result:
     first_post_id = fb_result[0].get("id")
@@ -163,12 +166,12 @@ if fb_result:
         Write a short, friendly, engaging comment in Bengali for this Facebook post.
         Include emojis naturally.
         """
-        comment_resp = model.generate_text(comment_prompt)
+        comment_resp = model.generate_content(comment_prompt)
         comment_text = comment_resp.text.strip()
         post_fb_comment(first_post_id, comment_text)
 
 # -----------------------------
-# 8️⃣ Log successful post
+# Log successful post
 # -----------------------------
 posted_articles.append(article_title)
 with open(LOG_FILE, "w") as f:
