@@ -7,6 +7,12 @@ from utils import download_image, highlight_keywords, post_fb_comment
 import json
 import random
 from datetime import datetime, timedelta
+import urllib3
+
+# -----------------------------
+# Disable HTTPS warnings
+# -----------------------------
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # -----------------------------
 # 1️⃣ Configuration
@@ -55,7 +61,7 @@ time_limit = datetime.now() - timedelta(minutes=15)
 
 for item in soup.select("a.gPFEn"):
     title = item.text.strip()
-    link = urljoin(PAGE_URL, item["href"])
+    link = urljoin(PAGE_URL, item.get("href", ""))
     
     source_tag = item.find_parent().select_one("div.vr1PYe")
     source = source_tag.text.strip() if source_tag else ""
@@ -67,9 +73,6 @@ for item in soup.select("a.gPFEn"):
     if link in posted_articles:
         continue
 
-    # Optional: convert time_text to datetime and filter last 15 min
-    # Skipping parsing for simplicity; you can implement if source provides exact datetime
-    
     articles.append({
         "title": title,
         "link": link,
@@ -88,7 +91,6 @@ model = genai.GenerativeModel("gemini-2.5-flash")
 
 for article in articles:
     # Generate engagement & uniqueness score (placeholder random)
-    # You can replace this with AI scoring logic
     article["score"] = random.randint(5, 10)
 
 # Sort by score (descending)
@@ -111,12 +113,30 @@ for art in top_articles:
     source = art["source"]
     time_text = art["time"]
 
-    # Extract image
-    img_tag = soup.find("a", href=link).find_next("img")
-    img_url = img_tag["src"] if img_tag else None
-    local_images = []
+    # Safe image extraction
+    a_tag = soup.find("a", href=link)
+    img_tag = a_tag.find_next("img") if a_tag else None
+    img_url = None
+    if img_tag:
+        if img_tag.has_attr("data-src"):
+            img_url = img_tag["data-src"]
+        elif img_tag.has_attr("srcset"):
+            srcset = img_tag["srcset"].split(",")
+            img_url = srcset[-1].split()[0]
+        elif img_tag.has_attr("src"):
+            img_url = img_tag["src"]
+
+    # Fallback: og:image
+    if not img_url:
+        meta_img = soup.find("meta", property="og:image")
+        if meta_img:
+            img_url = meta_img.get("content")
+    
     if img_url:
         img_url = upgrade_attachment_url(urljoin(PAGE_URL, img_url))
+
+    local_images = []
+    if img_url:
         if download_image(img_url, "img_0.jpg"):
             local_images.append("img_0.jpg")
 
@@ -176,3 +196,5 @@ for art in top_articles:
     posted_articles.append(link)
     with open(LOG_FILE, "w") as f:
         json.dump(posted_articles, f, ensure_ascii=False, indent=2)
+
+print("✅ Top articles posted successfully!")
