@@ -118,8 +118,14 @@ if img_url:
 model = genai.GenerativeModel("gemini-2.5-flash")
 
 summary_prompt = f"""
-নিচের নিউজ কনটেন্টকে বাংলায় ৩-৪ লাইনের আকর্ষণীয়, 
-human-like ফেসবুক পোস্ট স্টাইলে সাজাও। ইমোজি ব্যবহার করবে। 
+নিচের নিউজ কনটেন্টকে বাংলায় **সরাসরি, আকর্ষণীয় এবং বিস্তারিত ফেসবুক পোস্ট স্টাইলে** সাজাও। 
+- যতটা সম্ভব news cover করবে। 
+- ৩-৪ লাইনের সীমাবদ্ধতা নেই। 
+- কখনো intro বা spoiler text যোগ করা হবে না। 
+- Human-like, engaging tone হবে। 
+- Natural emojis ব্যবহার করবে। 
+- পোস্ট শেষে মানুষকে comment করতে উদ্দীপিত করবে, যেমন: 'আপনার মতামত কমেন্টে জানান 👇'
+
 নিউজ কনটেন্ট:
 ---
 {title}
@@ -130,9 +136,11 @@ human-like ফেসবুক পোস্ট স্টাইলে সাজা
 summary_resp = model.generate_content(summary_prompt)
 summary_text = summary_resp.text.strip()
 
+# Highlight keywords
 keywords = title.split()[:3]
 highlighted_text = highlight_keywords(summary_text, keywords)
 
+# Generate hashtags
 hashtag_prompt = f"""
 Generate 3-5 relevant Bengali hashtags for this news article.
 Title: {title}
@@ -142,6 +150,7 @@ hashtag_resp = model.generate_content(hashtag_prompt)
 hashtags = [tag.strip() for tag in hashtag_resp.text.split() if tag.startswith("#")]
 hashtags_text = " ".join(hashtags)
 
+# Final FB content
 fb_content = f"{highlighted_text}\n\n{hashtags_text}"
 print("✅ Generated FB Content:\n", fb_content)
 
@@ -175,7 +184,7 @@ if fb_result:
         Article Title: {title}
         Summary: {summary_text}
         Write a short, friendly, engaging comment in Bengali for this Facebook post.
-        Include emojis naturally.
+        Include emojis naturally to encourage user engagement.
         """
         comment_resp = model.generate_content(comment_prompt)
         comment_text = comment_resp.text.strip()
