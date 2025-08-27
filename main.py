@@ -1,15 +1,11 @@
 import os
+import time
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin
-import urllib3
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 from utils import download_image, highlight_keywords, post_fb_comment, is_duplicate, log_post
 import google.generativeai as genai
-
-# -----------------------------
-# ⚡ Warnings hide
-# -----------------------------
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # -----------------------------
 # CONFIG
@@ -22,23 +18,36 @@ TOPIC_URL = os.environ.get("TOPIC_URL")  # Google News topic page
 genai.configure(api_key=GEN_API_KEY)
 
 # -----------------------------
-# 1️⃣ Collect article links from Google News
+# 1️⃣ Selenium setup
+# -----------------------------
+chrome_options = Options()
+chrome_options.add_argument("--headless")
+chrome_options.add_argument("--no-sandbox")
+chrome_options.add_argument("--disable-dev-shm-usage")
+driver = webdriver.Chrome(options=chrome_options)
+
+# -----------------------------
+# 2️⃣ Collect article links from Google News topic
 # -----------------------------
 def get_google_news_articles(topic_url):
-    headers = {"User-Agent": "Mozilla/5.0"}
-    print("🔹 Fetching Google News topic page...")
-    r = requests.get(topic_url, headers=headers, verify=False)
-    soup = BeautifulSoup(r.text, "html.parser")
+    print("🔹 Loading Google News topic page with Selenium...")
+    driver.get(topic_url)
+    time.sleep(5)  # wait for JS render
+
+    soup = BeautifulSoup(driver.page_source, "html.parser")
     articles = []
     for a in soup.select("a.DY5T1d"):
-        link = urljoin("https://news.google.com", a["href"].replace("./", ""))
+        link = a.get("href")
+        if link.startswith("./"):
+            link = link.replace("./", "")
+            link = "https://news.google.com" + link
         title = a.get_text(strip=True)
         articles.append({"title": title, "link": link})
     print(f"🔹 {len(articles)} articles found on topic page.")
     return articles
 
 # -----------------------------
-# 2️⃣ Scrape publisher page for content + images
+# 3️⃣ Scrape publisher article
 # -----------------------------
 def scrape_article_content(article_url):
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -61,7 +70,7 @@ def scrape_article_content(article_url):
         return {"text": "", "images": []}
 
 # -----------------------------
-# 3️⃣ Gemini AI post generator
+# 4️⃣ Gemini AI post generator
 # -----------------------------
 def ai_generate_post(title, content):
     prompt = f"""
@@ -80,7 +89,7 @@ Task:
     return resp.text
 
 # -----------------------------
-# 4️⃣ Post to Facebook
+# 5️⃣ Post to Facebook
 # -----------------------------
 def post_to_facebook(content, images):
     fb_api_url = f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos"
@@ -104,7 +113,7 @@ def post_to_facebook(content, images):
 # RUN
 # -----------------------------
 articles = get_google_news_articles(TOPIC_URL)
-for art in articles[:3]:  # প্রথম ৩টা article test
+for art in articles[:5]:  # প্রথম ৫টা article test
     print(f"\n==============================")
     print("Article Title:", art["title"])
 
@@ -135,3 +144,6 @@ for art in articles[:3]:  # প্রথম ৩টা article test
 
     # Log article
     log_post(art["title"])
+
+# Close Selenium driver
+driver.quit()
