@@ -1,4 +1,4 @@
-selenium
-beautifulsoup4
 requests
+beautifulsoup4
+newspaper3k
 google-generativeai
