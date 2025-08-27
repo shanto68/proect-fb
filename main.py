@@ -1,149 +1,177 @@
 import os
-import time
+import json
 import requests
 from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from utils import download_image, highlight_keywords, post_fb_comment, is_duplicate, log_post
+from newspaper import Article
 import google.generativeai as genai
+from utils import check_duplicate, download_image, highlight_keywords, post_fb_comment
 
 # -----------------------------
-# CONFIG
+# 1️⃣ Configuration
 # -----------------------------
+NEWS_URL = "https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx1YlY4U0FtSnVHZ0pDUkNnQVAB?hl=bn&gl=BD&ceid=BD%3Abn"
 FB_PAGE_ID = os.environ.get("FB_PAGE_ID")
 FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 GEN_API_KEY = os.environ.get("GEMINI_API_KEY")
-TOPIC_URL = os.environ.get("TOPIC_URL")  # Google News topic page
+LOG_FILE = "posted_articles.json"
+
+if not GEN_API_KEY:
+    print("❌ GEMINI_API_KEY not provided.")
+    exit()
 
 genai.configure(api_key=GEN_API_KEY)
 
 # -----------------------------
-# 1️⃣ Selenium setup
+# 2️⃣ Load posted articles
 # -----------------------------
-chrome_options = Options()
-chrome_options.add_argument("--headless")
-chrome_options.add_argument("--no-sandbox")
-chrome_options.add_argument("--disable-dev-shm-usage")
-driver = webdriver.Chrome(options=chrome_options)
+try:
+    with open(LOG_FILE, "r") as f:
+        posted_articles = json.load(f)
+except:
+    posted_articles = []
 
 # -----------------------------
-# 2️⃣ Collect article links from Google News topic
+# 3️⃣ Scrape Google News Page
 # -----------------------------
-def get_google_news_articles(topic_url):
-    print("🔹 Loading Google News topic page with Selenium...")
-    driver.get(topic_url)
-    time.sleep(5)  # wait for JS render
+headers = {"User-Agent": "Mozilla/5.0"}
+r = requests.get(NEWS_URL, headers=headers)
+soup = BeautifulSoup(r.text, "html.parser")
 
-    soup = BeautifulSoup(driver.page_source, "html.parser")
-    articles = []
-    for a in soup.select("a.DY5T1d"):
-        link = a.get("href")
-        if link.startswith("./"):
-            link = link.replace("./", "")
-            link = "https://news.google.com" + link
-        title = a.get_text(strip=True)
-        articles.append({"title": title, "link": link})
-    print(f"🔹 {len(articles)} articles found on topic page.")
-    return articles
+article_link = None
+article_title = None
 
-# -----------------------------
-# 3️⃣ Scrape publisher article
-# -----------------------------
-def scrape_article_content(article_url):
-    headers = {"User-Agent": "Mozilla/5.0"}
-    print(f"🔹 Scraping article: {article_url}")
-    try:
-        r = requests.get(article_url, headers=headers, timeout=10, verify=False)
-        soup = BeautifulSoup(r.text, "html.parser")
-        paragraphs = [p.get_text(" ", strip=True) for p in soup.find_all("p")]
-        text = "\n".join(paragraphs)
+for a in soup.select("a.WwrzSb"):
+    title = a.get_text()
+    link = "https://news.google.com" + a['href'][1:]
+    if title not in posted_articles and not check_duplicate(title):
+        article_title = title
+        article_link = link
+        break
 
-        imgs = []
-        for img in soup.find_all("img"):
-            src = img.get("src") or img.get("data-src")
-            if src and src.startswith("http"):
-                imgs.append(src)
-        print(f"🔹 {len(imgs)} images found in article.")
-        return {"text": text, "images": list(set(imgs))}
-    except Exception as e:
-        print("❌ Article scrape failed:", e)
-        return {"text": "", "images": []}
+if not article_link:
+    print("⚠️ No new articles found.")
+    exit()
+
+print("📰 Latest Article:", article_title)
+print("🔗 URL:", article_link)
 
 # -----------------------------
-# 4️⃣ Gemini AI post generator
+# 4️⃣ Extract Full Content & Images
 # -----------------------------
-def ai_generate_post(title, content):
-    prompt = f"""
-Article Title: {title}
-Content: {content[:1500]}
+try:
+    article = Article(article_link, language="bn")
+    article.download()
+    article.parse()
+    full_content = article.text
+    top_image = article.top_image
+except Exception as e:
+    print("❌ Full content extraction failed:", e)
+    full_content = article_title
+    top_image = None
 
-Task:
-1. Rewrite title for FB eye-catching style.
-2. Create short 3-5 line engaging FB post.
-3. Suggest 8-12 trending hashtags (Bangla + English).
-4. Generate one engaging comment for FB post.
+candidate_images = []
+if top_image:
+    candidate_images.append(top_image)
+
+# -----------------------------
+# Auto-detect highest resolution images
+# -----------------------------
+def pick_high_res(images):
+    scored = []
+    for url in images:
+        try:
+            r = requests.head(url, timeout=5, headers=headers, verify=False)
+            size = int(r.headers.get('Content-Length', 0))
+            scored.append((size, url))
+        except:
+            scored.append((0, url))
+    if scored:
+        scored.sort(reverse=True)
+        return [url for size, url in scored]
+    return images
+
+high_res_images = pick_high_res(candidate_images)
+
+# -----------------------------
+# Download images locally
+# -----------------------------
+local_images = []
+for idx, img_url in enumerate(high_res_images):
+    filename = f"img_{idx}.jpg"
+    if download_image(img_url, filename):
+        local_images.append(filename)
+    if idx >= 4:
+        break
+
+# -----------------------------
+# 5️⃣ Generate FB Post Content
+# -----------------------------
+model = genai.GenerativeModel("gemini-2.5-flash")
+
+summary_prompt = f"""
+নিচের নিউজ কনটেন্টকে বাংলায় ৩-৪ লাইনের আকর্ষণীয়, 
+human-like ফেসবুক পোস্ট স্টাইলে সাজাও। ইমোজি ব্যবহার করবে।
+নিউজ কনটেন্ট:
+---
+{full_content}
 """
-    model = genai.GenerativeModel("gemini-2.5-flash")
-    print("🔹 Generating AI post content...")
-    resp = model.generate_content(prompt)
-    return resp.text
+
+summary_resp = model.generate_text(summary_prompt)
+summary_text = summary_resp.text.strip()
+
+keywords = article_title.split()[:3]
+highlighted_text = highlight_keywords(summary_text, keywords)
+
+hashtag_prompt = f"""
+Generate 3-5 relevant Bengali hashtags for this news article.
+Title: {article_title}
+Summary: {summary_text}
+"""
+hashtag_resp = model.generate_text(hashtag_prompt)
+hashtags = [tag.strip() for tag in hashtag_resp.text.split() if tag.startswith("#")]
+hashtags_text = " ".join(hashtags)
+
+fb_content = f"{highlighted_text}\n\n{hashtags_text}"
 
 # -----------------------------
-# 5️⃣ Post to Facebook
+# 6️⃣ Post to Facebook
 # -----------------------------
-def post_to_facebook(content, images):
-    fb_api_url = f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos"
-    results = []
-    if images:  # only post images if available
-        for idx, img_file in enumerate(images):
-            data = {"caption": content if idx==0 else "", "access_token": FB_ACCESS_TOKEN}
-            with open(img_file, "rb") as f:
-                files = {"source": f}
-                print(f"🔹 Posting image {img_file} to FB...")
-                r = requests.post(fb_api_url, data=data, files=files, verify=False)
-            results.append(r.json())
-    else:  # no images, post text only
-        print("🔹 No images found. Posting text-only FB post...")
-        data = {"message": content, "access_token": FB_ACCESS_TOKEN}
-        r = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed", data=data, verify=False)
-        results.append(r.json())
-    return results
+fb_api_url = f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos"
+fb_result = []
+
+if local_images:
+    for idx, img_file in enumerate(local_images):
+        data = {"caption": fb_content if idx == 0 else "", "access_token": FB_ACCESS_TOKEN}
+        with open(img_file, "rb") as f:
+            files = {"source": f}
+            r = requests.post(fb_api_url, data=data, files=files)
+        fb_result.append(r.json())
+else:
+    post_data = {"message": fb_content, "access_token": FB_ACCESS_TOKEN}
+    r = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed", data=post_data)
+    fb_result.append(r.json())
 
 # -----------------------------
-# RUN
+# 7️⃣ Auto-comment
 # -----------------------------
-articles = get_google_news_articles(TOPIC_URL)
-for art in articles[:5]:  # প্রথম ৫টা article test
-    print(f"\n==============================")
-    print("Article Title:", art["title"])
+if fb_result:
+    first_post_id = fb_result[0].get("id")
+    if first_post_id:
+        comment_prompt = f"""
+        Article Title: {article_title}
+        Summary: {summary_text}
+        Write a short, friendly, engaging comment in Bengali for this Facebook post.
+        Include emojis naturally.
+        """
+        comment_resp = model.generate_text(comment_prompt)
+        comment_text = comment_resp.text.strip()
+        post_fb_comment(first_post_id, comment_text)
 
-    if is_duplicate(art["title"]):
-        print("⚠️ Duplicate article. Skipping.")
-        continue
+# -----------------------------
+# 8️⃣ Log successful post
+# -----------------------------
+posted_articles.append(article_title)
+with open(LOG_FILE, "w") as f:
+    json.dump(posted_articles, f)
 
-    scraped = scrape_article_content(art["link"])
-    text = scraped["text"] or art["title"]
-    imgs = scraped["images"][:3]  # only existing images
-
-    # Download images locally
-    local_imgs = []
-    for idx, img in enumerate(imgs):
-        filename = f"article_{idx}.jpg"
-        if download_image(img, filename):
-            local_imgs.append(filename)
-
-    print("Local images ready:", local_imgs if local_imgs else "No images")
-
-    # Gemini AI generate post + hashtags + comment
-    ai_output = ai_generate_post(art["title"], text)
-    print("AI Generated Content Preview:\n", ai_output[:500])
-
-    # FB Post
-    fb_resp = post_to_facebook(ai_output, local_imgs)
-    print("FB Response:", fb_resp)
-
-    # Log article
-    log_post(art["title"])
-
-# Close Selenium driver
-driver.quit()
+print("✅ Article posted successfully!")
