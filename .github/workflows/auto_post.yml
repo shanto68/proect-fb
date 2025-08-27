@@ -3,14 +3,14 @@ name: Auto Post to FB
 on:
   schedule:
     - cron: '0 * * * *'  # প্রতি ঘন্টা চালাবে
-  workflow_dispatch:
+  workflow_dispatch:       # ম্যানুয়ালি চালানোর জন্য
 
 jobs:
   post_job:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v3
 
       - name: Setup Python
@@ -20,10 +20,9 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install --upgrade pip
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install "lxml[html_clean]"  # newspaper এর জন্য প্রয়োজন
-          pip install lxml_html_clean      # fallback
+          pip install beautifulsoup4 requests google-generativeai
 
       - name: Run Script
         env:
