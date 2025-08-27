@@ -2,8 +2,14 @@ import os
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+import urllib3
 from utils import download_image, highlight_keywords, post_fb_comment, is_duplicate, log_post
 import google.generativeai as genai
+
+# -----------------------------
+# ⚡ Warnings hide
+# -----------------------------
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # -----------------------------
 # CONFIG
@@ -12,7 +18,6 @@ FB_PAGE_ID = os.environ.get("FB_PAGE_ID")
 FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 GEN_API_KEY = os.environ.get("GEMINI_API_KEY")
 TOPIC_URL = os.environ.get("TOPIC_URL")  # Google News topic page
-
 DEFAULT_IMAGE = "https://i.ibb.co/7JfqXxB/default-news.jpg"
 
 genai.configure(api_key=GEN_API_KEY)
@@ -36,7 +41,7 @@ def get_google_news_articles(topic_url):
 # -----------------------------
 def scrape_article_content(article_url):
     headers = {"User-Agent": "Mozilla/5.0"}
-    r = requests.get(article_url, headers=headers, timeout=10)
+    r = requests.get(article_url, headers=headers, timeout=10, verify=False)
     soup = BeautifulSoup(r.text, "html.parser")
 
     paragraphs = [p.get_text(" ", strip=True) for p in soup.find_all("p")]
@@ -77,7 +82,7 @@ def post_to_facebook(content, images):
         data = {"caption": content if idx==0 else "", "access_token": FB_ACCESS_TOKEN}
         with open(img_file, "rb") as f:
             files = {"source": f}
-            r = requests.post(fb_api_url, data=data, files=files)
+            r = requests.post(fb_api_url, data=data, files=files, verify=False)
         results.append(r.json())
     return results
 
