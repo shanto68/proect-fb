@@ -2,6 +2,7 @@ import os
 import json
 import requests
 from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 import google.generativeai as genai
 from utils import check_duplicate, download_image, highlight_keywords, post_fb_comment
 
@@ -32,32 +33,29 @@ except:
 # -----------------------------
 # 3️⃣ Scrape page
 # -----------------------------
-try:
-    headers = {"User-Agent": "Mozilla/5.0"}
-    r = requests.get(PAGE_URL, headers=headers, timeout=10, verify=False)
-    r.raise_for_status()
-    soup = BeautifulSoup(r.text, "html.parser")
+headers = {"User-Agent": "Mozilla/5.0"}
+r = requests.get(PAGE_URL, headers=headers, verify=False)
+soup = BeautifulSoup(r.text, "html.parser")
 
-    # Latest article
-    first_article = soup.find("a", class_="gPFEn")
-    title = first_article.get_text(strip=True)
-    article_url = first_article['href']
-    if not article_url.startswith("http"):
-        article_url = PAGE_URL.rstrip("/") + "/" + article_url.lstrip("/")
-
-    # Image
-    img_tag = soup.find("img", class_="Quavad")
-    top_image = img_tag['src'] if img_tag else None
-    if top_image and not top_image.startswith("http"):
-        top_image = PAGE_URL.rstrip("/") + "/" + top_image.lstrip("/")
-
-except Exception as e:
-    print("❌ Page scraping failed:", e)
+# Extract title, link, image
+title_tag = soup.select_one("a.gPFEn")
+if not title_tag:
+    print("❌ Title not found")
     exit()
+title = title_tag.get_text(strip=True)
+article_url = title_tag.get("href")
+article_url = urljoin(PAGE_URL, article_url)
+
+img_tag = soup.select_one("img.Quavad")
+if img_tag:
+    img_url = img_tag.get("src")
+    img_url = urljoin(PAGE_URL, img_url)  # Convert relative to full URL
+else:
+    img_url = None
 
 print("📰 Latest Article:", title)
 print("🔗 URL:", article_url)
-print("🖼️ Image URL:", top_image)
+print("🖼️ Image URL:", img_url)
 
 # -----------------------------
 # 4️⃣ Duplicate check
@@ -70,9 +68,12 @@ if title in posted_articles or check_duplicate(title):
 # 5️⃣ Download image
 # -----------------------------
 local_images = []
-if top_image:
-    if download_image(top_image, "img_0.jpg"):
-        local_images.append("img_0.jpg")
+if img_url:
+    filename = "img_0.jpg"
+    if download_image(img_url, filename):
+        local_images.append(filename)
+
+print("Local images downloaded:", local_images)
 
 # -----------------------------
 # 6️⃣ Generate FB Post Content
@@ -81,10 +82,9 @@ model = genai.GenerativeModel("gemini-2.5-flash")
 
 summary_prompt = f"""
 নিচের নিউজ কনটেন্টকে বাংলায় ৩-৪ লাইনের আকর্ষণীয়, 
-human-like ফেসবুক পোস্ট স্টাইলে সাজাও। ইমোজি ব্যবহার করবে।
-নিউজ কনটেন্ট:
----
-{title}
+human-like ফেসবুক পোস্ট স্টাইলে সাজাও। ইমোজি ব্যবহার করবে। 
+News Title: {title}
+Article URL: {article_url}
 """
 
 summary_resp = model.generate_content(summary_prompt)
