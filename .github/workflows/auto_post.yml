@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v3
 
       - name: Setup Python
@@ -19,7 +19,11 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install "lxml[html_clean]"  # newspaper এর জন্য প্রয়োজন
+          pip install lxml_html_clean      # fallback
 
       - name: Run Script
         env:
