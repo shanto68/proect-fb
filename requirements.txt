@@ -1,7 +1,5 @@
-requests
 beautifulsoup4
+requests
 google-generativeai
-python-dotenv
-feedparser
-newspaper3k
-lxml[html_clean]
+urllib3
+
