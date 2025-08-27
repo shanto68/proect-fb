@@ -1,5 +1,5 @@
-newspaper3k
-lxml[html_clean]
 requests
 beautifulsoup4
+newspaper3k[full]
 google-generativeai
+lxml[html_clean]
