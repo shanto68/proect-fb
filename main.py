@@ -5,6 +5,7 @@ from urllib.parse import urljoin
 import google.generativeai as genai
 from utils import download_image, highlight_keywords, post_fb_comment
 import json
+from datetime import datetime, timedelta
 
 # -----------------------------
 # 1️⃣ Configuration
@@ -46,154 +47,182 @@ except Exception as e:
     exit()
 
 # -----------------------------
-# 4️⃣ Extract latest article
+# 4️⃣ Extract multiple recent articles (last 1 hour)
 # -----------------------------
-title_tag = soup.select_one("a.gPFEn")
-if not title_tag:
-    print("❌ No article found")
+recent_articles = []
+one_hour_ago = datetime.now() - timedelta(hours=1)
+
+article_tags = soup.select("a.gPFEn")  # adjust selector as needed
+time_tags = soup.select("time.hvbAAd")
+
+for idx, title_tag in enumerate(article_tags):
+    try:
+        title = title_tag.text.strip()
+        link = urljoin(PAGE_URL, title_tag["href"])
+        time_tag = time_tags[idx] if idx < len(time_tags) else None
+        time_text = time_tag.text.strip() if time_tag else ""
+        # Optional: parse time_text to datetime and filter by last 1 hour
+        if link not in posted_articles:
+            recent_articles.append({
+                "title": title,
+                "link": link,
+                "time_text": time_text
+            })
+    except:
+        continue
+
+if not recent_articles:
+    print("⚠️ No new articles to post.")
     exit()
 
-title = title_tag.text.strip()
-link = urljoin(PAGE_URL, title_tag["href"])
-
-source_tag = soup.select_one("div.vr1PYe")
-source = source_tag.text.strip() if source_tag else ""
-
-time_tag = soup.select_one("time.hvbAAd")
-time_text = time_tag.text.strip() if time_tag else ""
-
-print("📰 Latest Article:", title)
-print("🔗 URL:", link)
-print("📌 Source:", source)
-print("⏰ Time:", time_text)
+print(f"📰 {len(recent_articles)} new articles found.")
 
 # -----------------------------
-# 5️⃣ Duplicate check (link-based only)
+# 5️⃣ AI Priority / Trending Scoring
 # -----------------------------
-if link in posted_articles:
-    print("⚠️ Already posted. Skipping.")
-    exit()
+def score_article(article):
+    prompt = f"""
+    Title: {article['title']}
+    Time: {article['time_text']}
+    Determine engagement potential on Facebook. 
+    Give score 1-10 (10=highest). 
+    Respond ONLY with a number.
+    """
+    model = genai.GenerativeModel("gemini-2.5-flash")
+    try:
+        resp = model.generate_content(prompt)
+        score = int(resp.text.strip())
+    except:
+        score = 5  # default medium priority
+    return score
 
-# -----------------------------
-# 6️⃣ Extract high-res image
-# -----------------------------
-def upgrade_attachment_url(url):
-    if "-w" in url and "-h" in url:
-        url = url.split("-w")[0] + "-w1080-h720"
-    return url
+for article in recent_articles:
+    article['score'] = score_article(article)
 
-img_tag = soup.select_one("img.Quavad")
-img_url = None
-if img_tag:
-    if img_tag.has_attr("data-src"):
-        img_url = img_tag["data-src"]
-    elif img_tag.has_attr("srcset"):
-        srcset = img_tag["srcset"].split(",")
-        img_url = srcset[-1].split()[0]
-    elif img_tag.has_attr("src"):
-        img_url = img_tag["src"]
-
-if img_url:
-    img_url = urljoin(PAGE_URL, img_url)
-    img_url = upgrade_attachment_url(img_url)
-
-# Fallback: og:image
-if not img_url:
-    meta_img = soup.find("meta", property="og:image")
-    if meta_img:
-        img_url = meta_img.get("content")
-        img_url = upgrade_attachment_url(img_url)
-
-print("🖼️ Image URL:", img_url)
-
-# Download image locally
-local_images = []
-if img_url:
-    if download_image(img_url, "img_0.jpg"):
-        local_images.append("img_0.jpg")
+# Sort by score descending
+recent_articles = sorted(recent_articles, key=lambda x: x['score'], reverse=True)
 
 # -----------------------------
-# 7️⃣ Generate FB Content
+# 6️⃣ Process high-priority articles (score >=6)
 # -----------------------------
-model = genai.GenerativeModel("gemini-2.5-flash")
+for article in recent_articles:
+    if article['score'] < 6:
+        print(f"⚠️ Skipping low-priority article: {article['title']}")
+        continue
 
-summary_prompt = f"""
-নিচের নিউজ কনটেন্টকে বাংলায় **সরাসরি, আকর্ষণীয় এবং বিস্তারিত ফেসবুক পোস্ট স্টাইলে** সাজাও। 
-- যতটা সম্ভব news cover করবে। 
-- ৩-৪ লাইনের সীমাবদ্ধতা নেই। 
-- কখনো intro বা spoiler text যোগ করা হবে না। 
-- Human-like, engaging tone হবে। 
-- Natural emojis ব্যবহার করবে। 
-- পোস্ট শেষে মানুষকে comment করতে উদ্দীপিত করবে, যেমন: 'আপনার মতামত কমেন্টে জানান 👇'
+    title = article['title']
+    link = article['link']
+    time_text = article['time_text']
 
-নিউজ কনটেন্ট:
----
-{title}
-{source}
-{time_text}
-"""
+    # -----------------------------
+    # 7️⃣ Extract high-res image
+    # -----------------------------
+    img_tag = soup.find("img", {"alt": title})
+    img_url = None
+    if img_tag:
+        if img_tag.has_attr("data-src"):
+            img_url = img_tag["data-src"]
+        elif img_tag.has_attr("srcset"):
+            srcset = img_tag["srcset"].split(",")
+            img_url = srcset[-1].split()[0]
+        elif img_tag.has_attr("src"):
+            img_url = img_tag["src"]
 
-summary_resp = model.generate_content(summary_prompt)
-summary_text = summary_resp.text.strip()
+    if img_url:
+        img_url = urljoin(PAGE_URL, img_url)
 
-# Highlight keywords
-keywords = title.split()[:3]
-highlighted_text = highlight_keywords(summary_text, keywords)
+    local_images = []
+    if img_url:
+        if download_image(img_url, "img_0.jpg"):
+            local_images.append("img_0.jpg")
 
-# Generate hashtags
-hashtag_prompt = f"""
-Generate 3-5 relevant Bengali hashtags for this news article.
-Title: {title}
-Summary: {summary_text}
-"""
-hashtag_resp = model.generate_content(hashtag_prompt)
-hashtags = [tag.strip() for tag in hashtag_resp.text.split() if tag.startswith("#")]
-hashtags_text = " ".join(hashtags)
+    # -----------------------------
+    # 8️⃣ AI Content Generation
+    # -----------------------------
+    summary_prompt = f"""
+    নিচের নিউজ কনটেন্টকে বাংলায় **সরাসরি, আকর্ষণীয় এবং বিস্তারিত ফেসবুক পোস্ট স্টাইলে** সাজাও। 
+    - যতটা সম্ভব news cover করবে। 
+    - ৩-৪ লাইনের সীমাবদ্ধতা নেই। 
+    - কখনো intro বা spoiler text যোগ করা হবে না। 
+    - Human-like, engaging tone হবে। 
+    - Natural emojis ব্যবহার করবে। 
+    - পোস্ট শেষে মানুষকে comment করতে উদ্দীপিত করবে, যেমন: 'আপনার মতামত কমেন্টে জানান 👇'
 
-# Final FB content
-fb_content = f"{highlighted_text}\n\n{hashtags_text}"
-print("✅ Generated FB Content:\n", fb_content)
+    নিউজ কনটেন্ট:
+    ---
+    {title}
+    {time_text}
+    """
 
-# -----------------------------
-# 8️⃣ Post to Facebook
-# -----------------------------
-fb_api_url = f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos"
-fb_result = []
+    model = genai.GenerativeModel("gemini-2.5-flash")
+    summary_resp = model.generate_content(summary_prompt)
+    summary_text = summary_resp.text.strip()
 
-if local_images:
-    for idx, img_file in enumerate(local_images):
-        data = {"caption": fb_content if idx == 0 else "", "access_token": FB_ACCESS_TOKEN}
-        with open(img_file, "rb") as f:
-            files = {"source": f}
-            r = requests.post(fb_api_url, data=data, files=files)
+    # Highlight keywords
+    keywords = title.split()[:3]
+    highlighted_text = highlight_keywords(summary_text, keywords)
+
+    # Generate hashtags
+    hashtag_prompt = f"""
+    Generate 3-5 relevant Bengali hashtags for this news article.
+    Title: {title}
+    Summary: {summary_text}
+    """
+    hashtag_resp = model.generate_content(hashtag_prompt)
+    hashtags = [tag.strip() for tag in hashtag_resp.text.split() if tag.startswith("#")]
+    hashtags_text = " ".join(hashtags)
+
+    # Engagement booster: AI discussion-starter question
+    question_prompt = f"""
+    Generate a short, friendly discussion-starter question in Bengali 
+    for the above post to encourage comments. Include emojis naturally.
+    """
+    question_resp = model.generate_content(question_prompt)
+    discussion_question = question_resp.text.strip()
+
+    fb_content = f"{highlighted_text}\n\n{hashtags_text}\n\n💬 {discussion_question}"
+    print("✅ Generated FB Content:\n", fb_content)
+
+    # -----------------------------
+    # 9️⃣ Post to Facebook
+    # -----------------------------
+    fb_api_url = f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos"
+    fb_result = []
+
+    if local_images:
+        for idx, img_file in enumerate(local_images):
+            data = {"caption": fb_content if idx == 0 else "", "access_token": FB_ACCESS_TOKEN}
+            with open(img_file, "rb") as f:
+                files = {"source": f}
+                r = requests.post(fb_api_url, data=data, files=files)
+            fb_result.append(r.json())
+    else:
+        post_data = {"message": fb_content, "access_token": FB_ACCESS_TOKEN}
+        r = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed", data=post_data)
         fb_result.append(r.json())
-else:
-    post_data = {"message": fb_content, "access_token": FB_ACCESS_TOKEN}
-    r = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed", data=post_data)
-    fb_result.append(r.json())
 
-print("📤 Facebook Response:", fb_result)
+    print("📤 Facebook Response:", fb_result)
 
-# -----------------------------
-# 9️⃣ Auto-comment
-# -----------------------------
-if fb_result:
-    first_post_id = fb_result[0].get("id")
-    if first_post_id:
-        comment_prompt = f"""
-        Article Title: {title}
-        Summary: {summary_text}
-        Write a short, friendly, engaging comment in Bengali for this Facebook post.
-        Include emojis naturally to encourage user engagement.
-        """
-        comment_resp = model.generate_content(comment_prompt)
-        comment_text = comment_resp.text.strip()
-        print("💬 Generated Comment:\n", comment_text)
-        post_fb_comment(first_post_id, comment_text)
+    # -----------------------------
+    # 🔟 Auto-comment
+    # -----------------------------
+    if fb_result:
+        first_post_id = fb_result[0].get("id")
+        if first_post_id:
+            comment_prompt = f"""
+            Article Title: {title}
+            Summary: {summary_text}
+            Write a short, friendly, engaging comment in Bengali for this Facebook post.
+            Include emojis naturally to encourage user engagement.
+            """
+            comment_resp = model.generate_content(comment_prompt)
+            comment_text = comment_resp.text.strip()
+            print("💬 Generated Comment:\n", comment_text)
+            post_fb_comment(first_post_id, comment_text)
 
-# -----------------------------
-# 🔟 Log successful post
-# -----------------------------
-posted_articles.append(link)   # শুধু লিঙ্ক সেভ করো
-with open(LOG_FILE, "w") as f:
-    json.dump(posted_articles, f, ensure_ascii=False, indent=2)
+    # -----------------------------
+    # 1️⃣1️⃣ Log successful post
+    # -----------------------------
+    posted_articles.append(link)
+    with open(LOG_FILE, "w") as f:
+        json.dump(posted_articles, f, ensure_ascii=False, indent=2)
