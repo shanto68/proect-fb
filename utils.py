@@ -1,6 +1,6 @@
 import os
 import requests
-import json
+import mimetypes
 
 # -----------------------------
 # Duplicate check via botlink.gt.tc
@@ -19,23 +19,36 @@ def check_duplicate(title):
         print("❌ Duplicate check failed:", e)
     return False
 
+
 # -----------------------------
-# Download image with headers + fallback
+# Download image with extension fix
 # -----------------------------
 def download_image(url, filename):
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
         r = requests.get(url, stream=True, timeout=10, headers=headers, verify=False)
-        if r.status_code == 200:
-            with open(filename, 'wb') as f:
+
+        if r.status_code == 200 and "image" in r.headers.get("Content-Type", ""):
+            # Detect extension
+            content_type = r.headers.get("Content-Type", "")
+            ext = mimetypes.guess_extension(content_type.split(";")[0].strip())
+            if not ext:
+                ext = ".jpg"  # fallback
+
+            # Ensure filename has extension
+            if not filename.endswith(ext):
+                filename = os.path.splitext(filename)[0] + ext
+
+            with open(filename, "wb") as f:
                 for chunk in r.iter_content(1024):
                     f.write(chunk)
-            return True
+            return filename
         else:
             print("❌ Failed to download:", url, r.status_code)
     except Exception as e:
         print("❌ Image download error:", e, url)
-    return False
+    return None
+
 
 # -----------------------------
 # Highlight keywords in text
@@ -45,6 +58,7 @@ def highlight_keywords(text, keywords):
         if kw in text:
             text = text.replace(kw, f"⚡{kw}⚡")
     return text
+
 
 # -----------------------------
 # Post comment to FB
