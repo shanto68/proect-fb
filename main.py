@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import google.generativeai as genai
 from utils import check_duplicate, download_image, highlight_keywords, post_fb_comment
+import json
 
 # -----------------------------
 # 1️⃣ Configuration
@@ -21,14 +22,17 @@ if not PAGE_URL:
 genai.configure(api_key=GEN_API_KEY)
 
 # -----------------------------
-# 2️⃣ Load posted articles
+# 2️⃣ Load / Create posted_articles.json
 # -----------------------------
-try:
-    import json
-    with open(LOG_FILE, "r") as f:
+if not os.path.exists(LOG_FILE):
+    with open(LOG_FILE, "w") as f:
+        json.dump([], f)
+
+with open(LOG_FILE, "r") as f:
+    try:
         posted_articles = json.load(f)
-except:
-    posted_articles = []
+    except:
+        posted_articles = []
 
 # -----------------------------
 # 3️⃣ Scrape page
@@ -64,9 +68,9 @@ print("📌 Source:", source)
 print("⏰ Time:", time_text)
 
 # -----------------------------
-# 5️⃣ Duplicate check
+# 5️⃣ Duplicate check (link-based)
 # -----------------------------
-if title in posted_articles or check_duplicate(title):
+if link in posted_articles or check_duplicate(title):
     print("⚠️ Already posted or duplicate. Skipping.")
     exit()
 
@@ -75,7 +79,7 @@ if title in posted_articles or check_duplicate(title):
 # -----------------------------
 def upgrade_attachment_url(url):
     if "-w" in url and "-h" in url:
-        url = url.split("-w")[0] + "-w1080-h720"  # বড় resolution
+        url = url.split("-w")[0] + "-w1080-h720"
     return url
 
 img_tag = soup.select_one("img.Quavad")
@@ -85,7 +89,7 @@ if img_tag:
         img_url = img_tag["data-src"]
     elif img_tag.has_attr("srcset"):
         srcset = img_tag["srcset"].split(",")
-        img_url = srcset[-1].split()[0]  # সর্বোচ্চ resolution
+        img_url = srcset[-1].split()[0]
     elif img_tag.has_attr("src"):
         img_url = img_tag["src"]
 
@@ -179,9 +183,8 @@ if fb_result:
         post_fb_comment(first_post_id, comment_text)
 
 # -----------------------------
-# 10️⃣ Log successful post
+# 🔟 Log successful post
 # -----------------------------
-posted_articles.append(title)
+posted_articles.append(link)   # শুধু লিঙ্ক সেভ করো
 with open(LOG_FILE, "w") as f:
-    import json
-    json.dump(posted_articles, f)
+    json.dump(posted_articles, f, ensure_ascii=False, indent=2)
