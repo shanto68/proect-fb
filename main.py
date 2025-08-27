@@ -6,9 +6,6 @@ from urllib.parse import urljoin
 import google.generativeai as genai
 from utils import check_duplicate, download_image, highlight_keywords, post_fb_comment
 
-# -----------------------------
-# 1️⃣ Configuration
-# -----------------------------
 PAGE_URL = os.environ.get("PAGE_URL")
 FB_PAGE_ID = os.environ.get("FB_PAGE_ID")
 FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
@@ -22,7 +19,7 @@ if not PAGE_URL:
 genai.configure(api_key=GEN_API_KEY)
 
 # -----------------------------
-# 2️⃣ Load posted articles
+# 1️⃣ Load posted articles
 # -----------------------------
 try:
     with open(LOG_FILE, "r") as f:
@@ -31,60 +28,80 @@ except:
     posted_articles = []
 
 # -----------------------------
-# 3️⃣ Scrape page
+# 2️⃣ Scrape the page
 # -----------------------------
-headers = {"User-Agent": "Mozilla/5.0"}
-r = requests.get(PAGE_URL, headers=headers, verify=False)
-soup = BeautifulSoup(r.text, "html.parser")
+try:
+    headers = {"User-Agent": "Mozilla/5.0"}
+    r = requests.get(PAGE_URL, headers=headers, timeout=10, verify=False)
+    soup = BeautifulSoup(r.text, "html.parser")
 
-# Extract title, link, image
-title_tag = soup.select_one("a.gPFEn")
-if not title_tag:
-    print("❌ Title not found")
+    # Title & Link
+    title_tag = soup.select_one("a.gPFEn")
+    title = title_tag.text.strip()
+    article_url = urljoin(PAGE_URL, title_tag.get("href"))
+
+    # Source & Time
+    source = soup.select_one("div.vr1PYe").text.strip() if soup.select_one("div.vr1PYe") else ""
+    time_text = soup.select_one("time.hvbAAd").text.strip() if soup.select_one("time.hvbAAd") else ""
+
+    # Images
+    img_tags = soup.select("img.Quavad")
+    candidate_images = []
+    for img in img_tags:
+        img_url = None
+        if img.has_attr("data-src"):
+            img_url = img["data-src"]
+        elif img.has_attr("srcset"):
+            srcset = img["srcset"].split(",")
+            img_url = srcset[-1].split()[0]  # largest
+        elif img.has_attr("src"):
+            img_url = img["src"]
+        if img_url:
+            # If /api/attachments/... format, try replace low-res
+            img_url = img_url.replace("-w280-h168", "-w1080-h720")
+            img_url = urljoin(PAGE_URL, img_url)
+            candidate_images.append(img_url)
+except Exception as e:
+    print("❌ Scraping failed:", e)
     exit()
-title = title_tag.get_text(strip=True)
-article_url = title_tag.get("href")
-article_url = urljoin(PAGE_URL, article_url)
-
-img_tag = soup.select_one("img.Quavad")
-if img_tag:
-    img_url = img_tag.get("src")
-    img_url = urljoin(PAGE_URL, img_url)  # Convert relative to full URL
-else:
-    img_url = None
 
 print("📰 Latest Article:", title)
 print("🔗 URL:", article_url)
-print("🖼️ Image URL:", img_url)
+print("🖼️ Candidate images:", candidate_images)
 
 # -----------------------------
-# 4️⃣ Duplicate check
+# 3️⃣ Duplicate check
 # -----------------------------
 if title in posted_articles or check_duplicate(title):
     print("⚠️ Already posted or duplicate. Skipping.")
     exit()
 
 # -----------------------------
-# 5️⃣ Download image
+# 4️⃣ Download images (max 5)
 # -----------------------------
 local_images = []
-if img_url:
-    filename = "img_0.jpg"
+for idx, img_url in enumerate(candidate_images):
+    filename = f"img_{idx}.jpg"
     if download_image(img_url, filename):
         local_images.append(filename)
+    if idx >= 4:
+        break
 
-print("Local images downloaded:", local_images)
+print("✅ Local images downloaded:", local_images)
 
 # -----------------------------
-# 6️⃣ Generate FB Post Content
+# 5️⃣ Generate FB content
 # -----------------------------
 model = genai.GenerativeModel("gemini-2.5-flash")
 
 summary_prompt = f"""
-নিচের নিউজ কনটেন্টকে বাংলায় ৩-৪ লাইনের আকর্ষণীয়, 
-human-like ফেসবুক পোস্ট স্টাইলে সাজাও। ইমোজি ব্যবহার করবে। 
-News Title: {title}
-Article URL: {article_url}
+নিচের নিউজ কনটেন্টকে বাংলায় ৩-৪ লাইনের আকর্ষণীয়,
+human-like ফেসবুক পোস্ট স্টাইলে সাজাও। ইমোজি ব্যবহার করবে।
+নিউজ কনটেন্ট:
+---
+{title}
+Source: {source}
+Time: {time_text}
 """
 
 summary_resp = model.generate_content(summary_prompt)
@@ -108,7 +125,7 @@ fb_content = f"{highlighted_text}\n\n{hashtags_text}"
 print("✅ Generated FB Content:\n", fb_content)
 
 # -----------------------------
-# 7️⃣ Post to Facebook
+# 6️⃣ Post to Facebook
 # -----------------------------
 fb_api_url = f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos"
 fb_result = []
@@ -128,7 +145,7 @@ else:
 print("📤 Facebook Response:", fb_result)
 
 # -----------------------------
-# 8️⃣ Auto-comment
+# 7️⃣ Auto-comment
 # -----------------------------
 if fb_result:
     first_post_id = fb_result[0].get("id")
@@ -145,7 +162,7 @@ if fb_result:
         post_fb_comment(first_post_id, comment_text)
 
 # -----------------------------
-# 9️⃣ Log successful post
+# 8️⃣ Log successful post
 # -----------------------------
 posted_articles.append(title)
 with open(LOG_FILE, "w") as f:
