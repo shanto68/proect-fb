@@ -30,25 +30,34 @@ except:
     posted_articles = []
 
 # -----------------------------
-# 3️⃣ Scrape Page
+# 3️⃣ Scrape page
 # -----------------------------
-headers = {"User-Agent": "Mozilla/5.0"}
-r = requests.get(PAGE_URL, headers=headers, timeout=10)
-soup = BeautifulSoup(r.text, "html.parser")
+try:
+    headers = {"User-Agent": "Mozilla/5.0"}
+    r = requests.get(PAGE_URL, headers=headers, timeout=10, verify=False)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
 
-article_el = soup.find("a", class_="gPFEn")
-if not article_el:
-    print("❌ No article found.")
+    # Latest article
+    first_article = soup.find("a", class_="gPFEn")
+    title = first_article.get_text(strip=True)
+    article_url = first_article['href']
+    if not article_url.startswith("http"):
+        article_url = PAGE_URL.rstrip("/") + "/" + article_url.lstrip("/")
+
+    # Image
+    img_tag = soup.find("img", class_="Quavad")
+    top_image = img_tag['src'] if img_tag else None
+    if top_image and not top_image.startswith("http"):
+        top_image = PAGE_URL.rstrip("/") + "/" + top_image.lstrip("/")
+
+except Exception as e:
+    print("❌ Page scraping failed:", e)
     exit()
-
-title = article_el.get_text(strip=True)
-article_url = article_el.get("href")
-
-img_el = soup.find("img", class_="Quavad")
-top_image = img_el.get("src") if img_el else None
 
 print("📰 Latest Article:", title)
 print("🔗 URL:", article_url)
+print("🖼️ Image URL:", top_image)
 
 # -----------------------------
 # 4️⃣ Duplicate check
@@ -58,31 +67,12 @@ if title in posted_articles or check_duplicate(title):
     exit()
 
 # -----------------------------
-# 5️⃣ Collect images
+# 5️⃣ Download image
 # -----------------------------
-candidate_images = [top_image] if top_image else []
-
-def pick_high_res(images):
-    scored = []
-    for url in images:
-        try:
-            r = requests.head(url, timeout=5, headers=headers, verify=False)
-            size = int(r.headers.get("Content-Length", 0))
-            scored.append((size, url))
-        except:
-            scored.append((0, url))
-    scored.sort(reverse=True)
-    return [url for size, url in scored]
-
-high_res_images = pick_high_res(candidate_images)
-
 local_images = []
-for idx, img_url in enumerate(high_res_images):
-    filename = f"img_{idx}.jpg"
-    if download_image(img_url, filename):
-        local_images.append(filename)
-    if idx >= 4:
-        break
+if top_image:
+    if download_image(top_image, "img_0.jpg"):
+        local_images.append("img_0.jpg")
 
 # -----------------------------
 # 6️⃣ Generate FB Post Content
@@ -92,16 +82,19 @@ model = genai.GenerativeModel("gemini-2.5-flash")
 summary_prompt = f"""
 নিচের নিউজ কনটেন্টকে বাংলায় ৩-৪ লাইনের আকর্ষণীয়, 
 human-like ফেসবুক পোস্ট স্টাইলে সাজাও। ইমোজি ব্যবহার করবে।
-News Title: {title}
-URL: {article_url}
+নিউজ কনটেন্ট:
+---
+{title}
 """
 
 summary_resp = model.generate_content(summary_prompt)
 summary_text = summary_resp.text.strip()
 
+# Highlight keywords
 keywords = title.split()[:3]
 highlighted_text = highlight_keywords(summary_text, keywords)
 
+# Generate hashtags
 hashtag_prompt = f"""
 Generate 3-5 relevant Bengali hashtags for this news article.
 Title: {title}
