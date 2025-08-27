@@ -2,7 +2,7 @@ name: Auto Post to FB
 
 on:
   schedule:
-    - cron: '*/20 * * * *'  # প্রতি 20 মিনিটে চালাবে
+    - cron: '*/10 * * * *'  # প্রতি 20 মিনিটে চালাবে
   workflow_dispatch:       # ম্যানুয়ালি চালানোর জন্য
 
 jobs:
