@@ -50,6 +50,8 @@ def highlight_keywords(text, keywords):
 # Post comment to FB
 # -----------------------------
 def post_fb_comment(post_id, comment_text):
+    import os
+    import requests
     FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
     fb_comment_url = f"https://graph.facebook.com/v17.0/{post_id}/comments"
     data = {"message": comment_text, "access_token": FB_ACCESS_TOKEN}
