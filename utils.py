@@ -1,10 +1,6 @@
-import os
 import requests
-import json
+import os
 
-# -----------------------------
-# Duplicate check via botlink.gt.tc
-# -----------------------------
 def check_duplicate(title):
     from urllib.parse import quote
     encoded_title = quote(title)
@@ -19,9 +15,6 @@ def check_duplicate(title):
         print("❌ Duplicate check failed:", e)
     return False
 
-# -----------------------------
-# Download image with headers + fallback
-# -----------------------------
 def download_image(url, filename):
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -31,27 +24,17 @@ def download_image(url, filename):
                 for chunk in r.iter_content(1024):
                     f.write(chunk)
             return True
-        else:
-            print("❌ Failed to download:", url, r.status_code)
     except Exception as e:
         print("❌ Image download error:", e, url)
     return False
 
-# -----------------------------
-# Highlight keywords in text
-# -----------------------------
 def highlight_keywords(text, keywords):
     for kw in keywords:
         if kw in text:
             text = text.replace(kw, f"⚡{kw}⚡")
     return text
 
-# -----------------------------
-# Post comment to FB
-# -----------------------------
 def post_fb_comment(post_id, comment_text):
-    import os
-    import requests
     FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
     fb_comment_url = f"https://graph.facebook.com/v17.0/{post_id}/comments"
     data = {"message": comment_text, "access_token": FB_ACCESS_TOKEN}
