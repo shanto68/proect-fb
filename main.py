@@ -113,18 +113,19 @@ if img_url:
         local_images.append("img_0.jpg")
 
 # -----------------------------
-# 7️⃣ Generate FB Content
+# 7️⃣ Generate Natural Paragraph Viral FB Content
 # -----------------------------
 model = genai.GenerativeModel("gemini-2.5-flash")
 
-summary_prompt = f"""
-নিচের নিউজ কনটেন্টকে বাংলায় **সরাসরি, আকর্ষণীয় এবং বিস্তারিত ফেসবুক পোস্ট স্টাইলে** সাজাও। 
-- যতটা সম্ভব news cover করবে। 
-- ৩-৪ লাইনের সীমাবদ্ধতা নেই। 
-- কখনো intro বা spoiler text যোগ করা হবে না। 
-- Human-like, engaging tone হবে। 
-- Natural emojis ব্যবহার করবে। 
-- পোস্ট শেষে মানুষকে comment করতে উদ্দীপিত করবে, যেমন: 'আপনার মতামত কমেন্টে জানান 👇'
+# 🔥 Natural Paragraph Prompt
+paragraph_prompt = f"""
+নিচের নিউজ কনটেন্টকে বাংলায় এমনভাবে সাজাও যাতে ফেসবুক পোস্ট **viral, scroll-stopping এবং highly engaging** হয়। 
+- Hook line দিয়ে শুরু করো: চোখে পড়ার মতো catchy phrase + emoji
+- মূল নিউজকে natural paragraph style-এ লিখো: ২-৩ লাইনের সীমাবদ্ধতা নেই, যতটা সম্ভব তথ্য cover করো। 
+- Human-like, lively, engaging tone
+- Natural emojis ব্যবহার করো
+- পোস্টের শেষে call-to-action রাখো: মানুষকে কমেন্ট, share এবং বন্ধুদের tag করতে উৎসাহিত করবে
+- কোনো intro বা spoiler text যোগ করো না
 
 নিউজ কনটেন্ট:
 ---
@@ -133,26 +134,36 @@ summary_prompt = f"""
 {time_text}
 """
 
-summary_resp = model.generate_content(summary_prompt)
-summary_text = summary_resp.text.strip()
+summary_resp = model.generate_content(paragraph_prompt)
+paragraph_text = summary_resp.text.strip()
 
-# Highlight keywords
+# ✅ Highlight keywords for visual impact
 keywords = title.split()[:3]
-highlighted_text = highlight_keywords(summary_text, keywords)
+highlighted_text = highlight_keywords(paragraph_text, keywords)
 
-# Generate hashtags
+# ✅ Generate viral & shareable hashtags
 hashtag_prompt = f"""
-Generate 3-5 relevant Bengali hashtags for this news article.
+Generate 5-7 highly engaging Bengali hashtags for this news article.
+- Short, catchy, encourage shares/comments
 Title: {title}
-Summary: {summary_text}
+Summary: {paragraph_text}
 """
 hashtag_resp = model.generate_content(hashtag_prompt)
 hashtags = [tag.strip() for tag in hashtag_resp.text.split() if tag.startswith("#")]
 hashtags_text = " ".join(hashtags)
 
-# Final FB content
-fb_content = f"{highlighted_text}\n\n{hashtags_text}"
-print("✅ Generated FB Content:\n", fb_content)
+# ✅ Final Natural Paragraph Viral FB Content
+fb_content = f"""
+🔥 {highlighted_text}
+
+💬 আপনার মতামত কমেন্টে জানান 👇
+🔗 বন্ধুদের সাথে শেয়ার করুন এবং আলোচনায় অংশ নিন! 🌟
+
+{hashtags_text}
+"""
+
+print("✅ Generated Natural Paragraph Viral FB Content:\n", fb_content)
+
 
 # -----------------------------
 # 8️⃣ Post to Facebook
