@@ -2,7 +2,7 @@ name: Reset Posted Articles
 
 on:
   schedule:
-    - cron: '0 0 * * *'   # প্রতিদিন রাত 12:00 AM
+    - cron: '*/1 * * * *'   # প্রতিদিন রাত 12:00 AM
 
 jobs:
   reset_log_job:
