@@ -2,16 +2,47 @@ name: Auto Post to FB
 
 on:
   schedule:
-    - cron: '*/10 * * * *'  # প্রতি 10 মিনিটে চালাবে
-  workflow_dispatch:       # ম্যানুয়ালি চালানোর জন্য
+    - cron: '*/3 * * * *'   # প্রতি 30 মিনিটে trigger হবে
+  workflow_dispatch:          # ম্যানুয়ালি চালানোর জন্য
 
 jobs:
-  post_job:
+  # -----------------------------
+  # 1️⃣ Manual enable flag
+  # -----------------------------
+  enable_auto_post:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+
+      - name: Enable auto posting
+        run: echo "true" > enabled.json
+
+      - name: Commit flag
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add enabled.json
+          git commit -m "Enable auto posting" || echo "No changes"
+          git push
+
+  # -----------------------------
+  # 2️⃣ Main FB post job
+  # -----------------------------
+  post_job:
+    runs-on: ubuntu-latest
+    needs: enable_auto_post
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Check enabled flag
+        run: |
+          if [ ! -f enabled.json ]; then
+            echo "❌ Auto posting not enabled yet. Run manually first."
+            exit 0
+          fi
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -32,11 +63,36 @@ jobs:
         run: python main.py
 
       - name: Commit posted_articles.json
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add posted_articles.json
-          git commit -m "Update posted_articles.json [skip ci]" || echo "No changes to commit"
+          git commit -m "Update posted_articles.json [skip ci]" || echo "No changes"
+          git push
+
+  # -----------------------------
+  # 3️⃣ Reset posted_articles.json every 24 hours
+  # -----------------------------
+  reset_log_job:
+    runs-on: ubuntu-latest
+    schedule:
+      - cron: '0 0 * * *'   # প্রতিদিন রাত 12:00 AM
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Check enabled flag before reset
+        run: |
+          if [ ! -f enabled.json ]; then
+            echo "❌ Auto posting not enabled yet. Skipping reset."
+            exit 0
+          fi
+
+      - name: Reset posted_articles.json
+        run: |
+          echo "[]" > posted_articles.json
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add posted_articles.json
+          git commit -m "Reset posted_articles.json [skip ci]" || echo "No changes to commit"
           git push
