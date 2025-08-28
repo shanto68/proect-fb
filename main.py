@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
@@ -68,9 +69,9 @@ print("📌 Source:", source)
 print("⏰ Time:", time_text)
 
 # -----------------------------
-# 5️⃣ Duplicate check (link-based only)
+# 5️⃣ Duplicate check (link + title)
 # -----------------------------
-if link in posted_articles:
+if any(link in x or title in x for x in posted_articles):
     print("⚠️ Already posted. Skipping.")
     exit()
 
@@ -78,9 +79,8 @@ if link in posted_articles:
 # 6️⃣ Extract high-res image
 # -----------------------------
 def upgrade_attachment_url(url):
-    if "-w" in url and "-h" in url:
-        url = url.split("-w")[0] + "-w1080-h720"
-    return url
+    # replace width-height patterns like -w400-h300 or =w400-h300
+    return re.sub(r'([-=])w\d+-h\d+', r'\1w1080-h720', url)
 
 img_tag = soup.select_one("img.Quavad")
 img_url = None
@@ -101,8 +101,7 @@ if img_url:
 if not img_url:
     meta_img = soup.find("meta", property="og:image")
     if meta_img:
-        img_url = meta_img.get("content")
-        img_url = upgrade_attachment_url(img_url)
+        img_url = upgrade_attachment_url(meta_img.get("content"))
 
 print("🖼️ Image URL:", img_url)
 
@@ -117,14 +116,13 @@ if img_url:
 # -----------------------------
 model = genai.GenerativeModel("gemini-2.5-flash")
 
-# 🔥 Natural Paragraph Prompt
 paragraph_prompt = f"""
 নিচের নিউজ কনটেন্টকে বাংলায় এমনভাবে সাজাও যাতে ফেসবুক পোস্ট **viral, scroll-stopping এবং highly engaging** হয়। 
 - Hook line দিয়ে শুরু করো: চোখে পড়ার মতো catchy phrase + emoji
-- মূল নিউজকে natural paragraph style-এ লিখো: ২-৩ লাইনের সীমাবদ্ধতা নেই, যতটা সম্ভব তথ্য cover করো। 
+- মূল নিউজকে natural paragraph style-এ লিখো
 - Human-like, lively, engaging tone
 - Natural emojis ব্যবহার করো
-- পোস্টের শেষে call-to-action রাখো: মানুষকে কমেন্ট, share এবং বন্ধুদের tag করতে উৎসাহিত করবে
+- পোস্টের শেষে call-to-action রাখো
 - কোনো intro বা spoiler text যোগ করো না
 
 নিউজ কনটেন্ট:
@@ -137,14 +135,13 @@ paragraph_prompt = f"""
 summary_resp = model.generate_content(paragraph_prompt)
 paragraph_text = summary_resp.text.strip()
 
-# ✅ Highlight keywords for visual impact
+# ✅ Highlight keywords
 keywords = title.split()[:3]
 highlighted_text = highlight_keywords(paragraph_text, keywords)
 
-# ✅ Generate viral & shareable hashtags
+# ✅ Generate hashtags
 hashtag_prompt = f"""
 Generate 5-7 highly engaging Bengali hashtags for this news article.
-- Short, catchy, encourage shares/comments
 Title: {title}
 Summary: {paragraph_text}
 """
@@ -152,7 +149,7 @@ hashtag_resp = model.generate_content(hashtag_prompt)
 hashtags = [tag.strip() for tag in hashtag_resp.text.split() if tag.startswith("#")]
 hashtags_text = " ".join(hashtags)
 
-# ✅ Final Natural Paragraph Viral FB Content
+# ✅ Final FB content
 fb_content = f"""
 🔥 {highlighted_text}
 
@@ -163,7 +160,6 @@ fb_content = f"""
 """
 
 print("✅ Generated Natural Paragraph Viral FB Content:\n", fb_content)
-
 
 # -----------------------------
 # 8️⃣ Post to Facebook
@@ -177,11 +173,19 @@ if local_images:
         with open(img_file, "rb") as f:
             files = {"source": f}
             r = requests.post(fb_api_url, data=data, files=files)
-        fb_result.append(r.json())
+        res = r.json()
+        if "error" in res:
+            print("❌ Facebook Error:", res["error"])
+        else:
+            fb_result.append(res)
 else:
     post_data = {"message": fb_content, "access_token": FB_ACCESS_TOKEN}
     r = requests.post(f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/feed", data=post_data)
-    fb_result.append(r.json())
+    res = r.json()
+    if "error" in res:
+        print("❌ Facebook Error:", res["error"])
+    else:
+        fb_result.append(res)
 
 print("📤 Facebook Response:", fb_result)
 
@@ -193,7 +197,7 @@ if fb_result:
     if first_post_id:
         comment_prompt = f"""
         Article Title: {title}
-        Summary: {summary_text}
+        Summary: {paragraph_text}
         Write a short, friendly, engaging comment in Bengali for this Facebook post.
         Include emojis naturally to encourage user engagement.
         """
@@ -205,6 +209,6 @@ if fb_result:
 # -----------------------------
 # 🔟 Log successful post
 # -----------------------------
-posted_articles.append(link)   # শুধু লিঙ্ক সেভ করো
+posted_articles.append(link)
 with open(LOG_FILE, "w") as f:
     json.dump(posted_articles, f, ensure_ascii=False, indent=2)
