@@ -2,8 +2,8 @@ name: Auto Post to FB
 
 on:
   schedule:
-    - cron: '*/30 * * * *'   # প্রতি 30 মিনিটে trigger হবে
-  workflow_dispatch:          # ম্যানুয়ালি চালানোর জন্য
+    - cron: '*/30 * * * *'   # প্রতি 30 মিনিটে trigger
+  workflow_dispatch:          # manual run
 
 jobs:
   enable_auto_post:
