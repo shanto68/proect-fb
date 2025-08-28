@@ -2,7 +2,7 @@ name: Reset Posted Articles
 
 on:
   schedule:
-    - cron: '*/1 * * * *'   # প্রতিদিন রাত 12:00 AM
+    - cron: '0 0 * * *'   # প্রতিদিন রাত 12:00 AM
 
 jobs:
   reset_log_job:
@@ -11,12 +11,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Check enabled flag before reset
+      - name: Check enabled flag
         run: |
           if [ ! -f enabled.json ]; then
             echo "❌ Auto posting not enabled yet. Skipping reset."
             exit 0
-          fi
 
       - name: Reset posted_articles.json
         run: |
