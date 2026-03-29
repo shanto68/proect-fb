@@ -303,3 +303,4 @@ if fb_result:
 posted_articles.append(link)
 with open(LOG_FILE, "w") as f:
     json.dump(posted_articles, f, ensure_ascii=False, indent=2)
+ 
