@@ -112,146 +112,86 @@ if img_url:
         local_images.append("img_0.jpg")
 
 # -----------------------------
-
-
-# -----------------------------
-# 🔟 ULTRA VIRAL FB CONTENT ENGINE
+# 7️⃣ Generate Natural Paragraph Viral FB Content (UPGRADED)
 # -----------------------------
 model = genai.GenerativeModel("gemini-2.5-flash")
 
-# -----------------------------
-# 🧠 MAIN PARAGRAPH (Clickbait Optimized)
-# -----------------------------
 paragraph_prompt = f"""
-নিচের নিউজ কনটেন্টকে এমনভাবে লিখো যাতে মানুষ স্ক্রল করতে না পারে 😱
+নিচের নিউজ কনটেন্টকে বাংলায় এমনভাবে সাজাও যাতে ফেসবুক পোস্ট viral, scroll-stopping এবং highly engaging হয়।
 
-PSYCHOLOGY RULES:
-- প্রথম লাইনে POWER HOOK (shock + curiosity + urgency)
-- এমনভাবে লিখো যেন "কি হয়েছে?" না জেনে থাকতে না পারে
-- curiosity gap রাখো (সব তথ্য একবারে বলো না)
-- emotional trigger ব্যবহার করো (fear / shock / concern)
-- ছোট ছোট line break (mobile friendly)
-- natural emoji use (🔥😱💥🚨)
+STRICT RULES:
+- কোনো intro text লিখবে না (যেমন: "এখানে...", "নিচে...")
+- কোনো explanation বা heading দিবে না
+- "---" ব্যবহার করবে না
+- সরাসরি hook line দিয়ে শুরু করবে
 
-ENDING:
-- Strong CTA (comment + share + opinion ask)
+CONTENT STYLE:
+- প্রথম লাইনে catchy hook + emoji (😱🔥🚨)
+- ছোট ছোট paragraph (mobile friendly)
+- human-like, engaging tone
+- curiosity gap রাখো
+- natural emojis ব্যবহার করো
+- শেষে CTA (comment + share)
 
 নিউজ:
----
 {title}
 {source}
 {time_text}
+
+FINAL: শুধু পোস্টের content দাও, extra কিছু না।
 """
 
-paragraph_text = model.generate_content(paragraph_prompt).text.strip()
+summary_resp = model.generate_content(paragraph_prompt)
+paragraph_text = summary_resp.text.strip()
 
+# 🛡️ Auto clean (extra text remove)
+import re
+paragraph_text = re.sub(r"^.*?(😱|🔥|🚨|💥)", r"\1", paragraph_text, flags=re.DOTALL)
+paragraph_text = paragraph_text.replace("---", "")
 
-# -----------------------------
-# ⚡ SMART KEYWORD HIGHLIGHT
-# -----------------------------
-def highlight_keywords(text, keywords):
-    for word in keywords:
-        text = text.replace(word, f"⚡{word}⚡")
-    return text
-
-keywords = title.split()[:4]
+# ✅ Highlight keywords
+keywords = title.split()[:3]
 highlighted_text = highlight_keywords(paragraph_text, keywords)
 
-
-# -----------------------------
-# 🔥 VIRAL HASHTAGS (Better Targeting)
-# -----------------------------
+# ✅ Generate hashtags (better)
 hashtag_prompt = f"""
-এই নিউজের জন্য 7টি viral Bengali hashtags তৈরি করো।
+Generate 5-7 Bengali viral hashtags.
 
-RULES:
-- mix of topic + emotion + trending
-- short and clickable
-- ONLY hashtags
+Rules:
+- short
+- trending style
+- only hashtags
 
 Title: {title}
 """
-
-hashtags_resp = model.generate_content(hashtag_prompt).text
-hashtags = [tag for tag in hashtags_resp.split() if tag.startswith("#")]
+hashtag_resp = model.generate_content(hashtag_prompt)
+hashtags = [tag.strip() for tag in hashtag_resp.text.split() if tag.startswith("#")]
 hashtags_text = " ".join(hashtags)
 
-
-# -----------------------------
-# 💬 COMMENT BOOSTER (ADVANCED)
-# -----------------------------
+# 💬 Comment Booster (NEW 🔥)
 comment_prompt = f"""
-এই পোস্টের জন্য 3টি আলাদা Facebook comment তৈরি করো যা মানুষকে reply দিতে বাধ্য করবে।
+Write 2 short engaging Facebook comments for this post.
 
-RULES:
-1. একটায় প্রশ্ন থাকবে (opinion bait)
-2. একটায় shock reaction থাকবে (emotional)
-3. একটায় debate trigger থাকবে (slightly controversial)
-
-Tone:
-- human-like
-- engaging
-- short
-- emoji ব্যবহার করো
-
-Only 3 comments.
-"""
-
-comments_text = model.generate_content(comment_prompt).text.strip()
-
-
-# -----------------------------
-# 🎯 ALT HOOKS (A/B TEST)
-# -----------------------------
-hook_prompt = f"""
-এই নিউজের জন্য 3টি viral hook line দাও:
-
-1. Shock
-2. Curiosity
-3. Emotional
-
-Bangla + emoji
-Only 3 lines.
-Title: {title}
-"""
-
-hooks = model.generate_content(hook_prompt).text.strip()
-
-
-# -----------------------------
-# 🧲 CLICK TRIGGER LINE (NEW 🔥)
-# -----------------------------
-trigger_prompt = f"""
-এই নিউজের জন্য 2টি ultra-click trigger line দাও।
-
-Style:
-- "আপনি বিশ্বাসই করবেন না..."
-- "শেষটা জানলে চমকে যাবেন..."
+1. Question (engagement bait)
+2. Emotional reaction
 
 Bangla + emoji
 """
+comment_resp = model.generate_content(comment_prompt)
+comments = comment_resp.text.strip()
 
-triggers = model.generate_content(trigger_prompt).text.strip()
-
-
-# -----------------------------
-# 📢 FINAL FB POST
-# -----------------------------
+# ✅ Final FB content
 fb_content = f"""
-{highlighted_text}
+🔥 {highlighted_text}
 
-👇 নিচে আপনার মতামত দিন  
-💬 কমেন্ট করুন  
-📤 শেয়ার করে সবাইকে জানিয়ে দিন!
+💬 আপনার কী মনে হয়? কমেন্টে জানান 👇
+📤 বন্ধুদের সাথে শেয়ার করুন!
 
 {hashtags_text}
 """
 
-print("🔥 MAIN POST:\n", fb_content)
-print("\n🧲 CLICK TRIGGERS:\n", triggers)
-print("\n🎯 ALT HOOKS:\n", hooks)
-print("\n💬 COMMENT BOOSTER:\n", comments_text)
-
+print("✅ FB Post:\n", fb_content)
+print("\n💬 Suggested Comments:\n", comments)
 # -----------------------------
 # 8️⃣ Post to Facebook
 # -----------------------------
@@ -303,4 +243,3 @@ if fb_result:
 posted_articles.append(link)
 with open(LOG_FILE, "w") as f:
     json.dump(posted_articles, f, ensure_ascii=False, indent=2)
- 
