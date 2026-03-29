@@ -139,15 +139,31 @@ paragraph_text = summary_resp.text.strip()
 keywords = title.split()[:3]
 highlighted_text = highlight_keywords(paragraph_text, keywords)
 
-# ✅ Generate hashtags
+
+
+
+
+
+# -----------------------------
+# 🔥 VIRAL HASHTAGS (Better Targeting)
+# -----------------------------
 hashtag_prompt = f"""
-Generate 5-7 highly engaging Bengali hashtags for this news article.
+এই নিউজের জন্য 7টি viral Bengali hashtags তৈরি করো।
+
+RULES:
+- mix of topic + emotion + trending
+- short and clickable
+- ONLY hashtags
+
 Title: {title}
-Summary: {paragraph_text}
 """
-hashtag_resp = model.generate_content(hashtag_prompt)
-hashtags = [tag.strip() for tag in hashtag_resp.text.split() if tag.startswith("#")]
+
+hashtags_resp = model.generate_content(hashtag_prompt).text
+hashtags = [tag for tag in hashtags_resp.split() if tag.startswith("#")]
 hashtags_text = " ".join(hashtags)
+
+
+
 
 # ✅ Final FB content
 fb_content = f"""
