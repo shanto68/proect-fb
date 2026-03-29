@@ -133,20 +133,24 @@ paragraph_prompt = f"""
 """
 
 summary_resp = model.generate_content(paragraph_prompt)
-paragraph_text = summary_resp.text.strip()
+paragraph_text = summary_resp.text.strip() if summary_resp and summary_resp.text else title
 
 # ✅ Highlight keywords
 keywords = title.split()[:3]
 highlighted_text = highlight_keywords(paragraph_text, keywords)
 
-# ✅ Generate hashtags
+# -----------------------------
+# 8️⃣ Generate hashtags properly
+# -----------------------------
 hashtag_prompt = f"""
 Generate 5-7 highly engaging Bengali hashtags for this news article.
 Title: {title}
 Summary: {paragraph_text}
 """
 hashtag_resp = model.generate_content(hashtag_prompt)
-hashtags = [tag.strip() for tag in hashtag_resp.text.split() if tag.startswith("#")]
+
+raw_tags = re.findall(r'#?\w+', hashtag_resp.text)
+hashtags = ["#" + tag.lstrip("#") for tag in raw_tags][:7]  # first 7 hashtags
 hashtags_text = " ".join(hashtags)
 
 # ✅ Final FB content
@@ -162,7 +166,7 @@ fb_content = f"""
 print("✅ Generated Natural Paragraph Viral FB Content:\n", fb_content)
 
 # -----------------------------
-# 8️⃣ Post to Facebook
+# 9️⃣ Post to Facebook
 # -----------------------------
 fb_api_url = f"https://graph.facebook.com/v17.0/{FB_PAGE_ID}/photos"
 fb_result = []
@@ -190,7 +194,7 @@ else:
 print("📤 Facebook Response:", fb_result)
 
 # -----------------------------
-# 9️⃣ Auto-comment
+# 🔟 Auto-comment
 # -----------------------------
 if fb_result:
     first_post_id = fb_result[0].get("id")
@@ -202,12 +206,12 @@ if fb_result:
         Include emojis naturally to encourage user engagement.
         """
         comment_resp = model.generate_content(comment_prompt)
-        comment_text = comment_resp.text.strip()
+        comment_text = comment_resp.text.strip() if comment_resp and comment_resp.text else "💬 অসাধারণ খবর! আপনার মতামত দিন 👇"
         print("💬 Generated Comment:\n", comment_text)
         post_fb_comment(first_post_id, comment_text)
 
 # -----------------------------
-# 🔟 Log successful post
+# 1️⃣1️⃣ Log successful post
 # -----------------------------
 posted_articles.append(link)
 with open(LOG_FILE, "w") as f:
